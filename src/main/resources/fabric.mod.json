@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "id": "vframegen",
+  "version": "${version}",
+  "name": "VFrameGen",
+  "description": "Frame generation for Minecraft's Vulkan (and OpenGL) renderer: shows generated frames between real ones, built by depth-aware interpolation. Works with Sodium, Iris shader packs and Distant Horizons. Includes render scale upscaling.",
+  "authors": [
+    "JMLambo"
+  ],
+  "contact": {
+    "homepage": "https://github.com/JMLambo/vframegen",
+    "sources": "https://github.com/JMLambo/vframegen",
+    "issues": "https://github.com/JMLambo/vframegen/issues"
+  },
+  "license": "MIT",
+  "icon": "assets/vframegen/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "io.github.jmlambo.vframegen.VFrameGen"
+    ],
+    "modmenu": [
+      "io.github.jmlambo.vframegen.ModMenuIntegration"
+    ],
+    "controlify": [
+      "io.github.jmlambo.vframegen.ControlifyIntegration"
+    ]
+  },
+  "mixins": [
+    "vframegen.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "minecraft": ">=26.3 <26.4",
+    "java": ">=25",
+    "fabric-api": "*"
+  },
+  "suggests": {
+    "cloth-config": "*",
+    "modmenu": "*",
+    "controlify": "*"
+  }
+}

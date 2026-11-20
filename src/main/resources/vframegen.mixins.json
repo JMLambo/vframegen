@@ -1,0 +1,23 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "io.github.jmlambo.vframegen.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "DebugEntryFpsMixin",
+    "GameRendererAccessor",
+    "GameRendererMixin",
+    "GlTransientMemoryMixin",
+    "MinecraftAccessor",
+    "MinecraftMixin",
+    "RenderTargetAccessor",
+    "VulkanCommandEncoderMixin",
+    "VulkanQueueIdleMixin",
+    "VulkanQueueMixin",
+    "VulkanSurfaceMixin",
+    "VulkanTransientMemoryMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
