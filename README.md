@@ -132,6 +132,8 @@ frames.
   sideways motion can smear edges a little. Things that move on their own (waving leaves, water,
   mobs) are only as smooth as the real frames.
 - Transparent HUD parts show the world behind them as of the nearer real frame.
+- The GUI is not warped, so HUD elements that turn with the camera (the F3 axis gizmo) only
+  update at the real frame rate and trail behind the world while turning.
 - OpenGL, AMD/Intel GPUs, Windows, and Reflex with the present thread have barely been tested.
 
 ## Building
