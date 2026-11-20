@@ -18,13 +18,13 @@
 
 uniform sampler2D WorldA;      // world, before the GUI
 uniform sampler2D DepthA;      // world depth, before the held item
-uniform sampler2D HandDepthA;  // held item depth (vanilla only)
+uniform sampler2D MaskA;       // held item mask: r hand buffer, g near-depth lock (grown)
 uniform sampler2D NoHandA;     // world before the held item (vanilla only)
 uniform sampler2D FinalA;      // what was shown: world + GUI
 #ifdef INTERPOLATE
 uniform sampler2D WorldB;
 uniform sampler2D DepthB;
-uniform sampler2D HandDepthB;
+uniform sampler2D MaskB;
 uniform sampler2D NoHandB;
 uniform sampler2D FinalB;
 #endif
@@ -54,6 +54,7 @@ struct Warp {
     float near;    // bigger = nearer, comparable between A and B
     int reason;
     bool hit;      // a real match for this pixel (not a fill, not off screen)
+    vec3 still;    // this source's world at the output pixel, not warped
 };
 
 bool isSky(float d) {
@@ -83,10 +84,9 @@ vec2 landingSpot(vec2 uvSrc, float depth, mat4 invViewProj, mat4 dstViewProj) {
     return (clip.xy / clip.w) * 0.5 + 0.5;
 }
 
-bool nearLocked(sampler2D depthTex, vec2 uv, vec4 flags) {
-    if (flags.y < 0.5) return false;
-    float d = texture(depthTex, uv).r;
-    return Params2.x > 0.5 ? d > flags.z : d < flags.z;
+// Held item, from the mask built once per real frame (lockmask.fsh).
+bool nearLocked(sampler2D mask, vec2 uv, vec4 flags) {
+    return flags.y > 0.5 && texture(mask, uv).g > 0.5;
 }
 
 bool offscreen(vec2 uv) {
@@ -97,7 +97,7 @@ vec3 sceneColor(sampler2D world, sampler2D noHand, vec2 uv, vec4 flags) {
     return flags.x > 0.5 ? texture(noHand, uv).rgb : texture(world, uv).rgb;
 }
 
-Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D handDepth, sampler2D noHand, sampler2D finalTex,
+Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampler2D noHand, sampler2D finalTex,
           mat4 invViewProj, mat4 dstViewProj, mat4 viewProjRot, vec4 flags) {
     Warp w;
     w.near = -1.0;
@@ -106,6 +106,7 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D handDepth, 
     // GUI / HUD: wherever the GUI changed the image, this source shows the GUI as it was.
     vec3 finalPx = texture(finalTex, uvDst).rgb;
     vec3 worldPx = texture(world, uvDst).rgb;
+    w.still = worldPx;
     vec3 diff = abs(finalPx - worldPx);
     if (max(diff.r, max(diff.g, diff.b)) > Params.x) {
         w.color = finalPx;
@@ -113,7 +114,8 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D handDepth, 
         return w;
     }
     // Held item: it moves with the camera, so it is not reprojected.
-    if ((flags.x > 0.5 && !isSky(texture(handDepth, uvDst).r)) || nearLocked(depthTex, uvDst, flags)) {
+    vec2 m = texture(mask, uvDst).rg;
+    if ((flags.x > 0.5 && m.r > 0.5) || (flags.y > 0.5 && m.g > 0.5)) {
         w.color = worldPx;
         w.reason = flags.x > 0.5 ? R_HAND : R_LOCKED;
         return w;
@@ -172,13 +174,13 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D handDepth, 
     }
 
     vec2 uv = clamp(uvSrc, vec2(0.0), vec2(1.0));
-    if (nearLocked(depthTex, uv, flags)) {
+    if (nearLocked(mask, uv, flags)) {
         // That would copy the held item into the world next to it. The world behind it is not in
         // this source, so carry on past the item along the same motion.
         w.reason = R_PAST_HAND;
         w.hit = false;
         vec2 stepUv = normalize((uv - uvDst) / Params2.zw + vec2(1.0e-4)) * 6.0 * Params2.zw;
-        for (int i = 0; i < 24 && nearLocked(depthTex, uv, flags); i++) {
+        for (int i = 0; i < 24 && nearLocked(mask, uv, flags); i++) {
             uv = clamp(uv + stepUv, vec2(0.0), vec2(1.0));
         }
     }
@@ -215,40 +217,51 @@ vec3 debugColor(vec3 color, int reason) {
 
 void main() {
     vec2 uvDst = texCoord;
-    Warp a = warp(uvDst, WorldA, DepthA, HandDepthA, NoHandA, FinalA, AInvViewProj, ADstViewProj, AViewProjRot, AFlags);
+    Warp a = warp(uvDst, WorldA, DepthA, MaskA, NoHandA, FinalA, AInvViewProj, ADstViewProj, AViewProjRot, AFlags);
     vec3 color = a.color;
     int reason = a.reason;
 
 #ifdef INTERPOLATE
-    Warp b = warp(uvDst, WorldB, DepthB, HandDepthB, NoHandB, FinalB, BInvViewProj, BDstViewProj, BViewProjRot, BFlags);
+    Warp b = warp(uvDst, WorldB, DepthB, MaskB, NoHandB, FinalB, BInvViewProj, BDstViewProj, BViewProjRot, BFlags);
     float t = Mix.x;
     bool aFixed = a.reason == R_GUI || a.reason == R_HAND || a.reason == R_LOCKED;
     bool bFixed = b.reason == R_GUI || b.reason == R_HAND || b.reason == R_LOCKED;
     if (aFixed || bFixed) {
-        // GUI and held item: take them from the source nearer in time, so they change in one step.
-        bool useB = t >= 0.5 ? bFixed || !aFixed : !aFixed;
-        color = useB ? b.color : a.color;
-        reason = useB ? b.reason : a.reason;
-    } else if (a.hit && b.hit) {
-        // Both saw it. Same surface: blend by time. Different surfaces: the nearer one is in front.
-        float ratio = max(a.near, b.near) / max(min(a.near, b.near), 1.0e-6);
-        bool same = (a.near < 0.0 && b.near < 0.0) || (a.near > 0.0 && b.near > 0.0 && ratio < 1.08);
-        if (same) {
-            color = mix(a.color, b.color, t);
-            reason = R_HIT;
-        } else {
-            bool useB = b.near > a.near;
-            color = useB ? b.color : a.color;
-            reason = useB ? b.reason : a.reason;
+        // GUI or held item in either source: the source nearer in time decides the whole pixel
+        // (its hand, its GUI, or its world there). Mixing would show both hand positions at once.
+        bool useB = t >= 0.5;
+        Warp n = useB ? b : a;
+        bool nFixed = useB ? bFixed : aFixed;
+        color = n.color;
+        reason = n.reason;
+        if (!nFixed && !n.hit) {
+            // Where the other frame's hand was, and this one's warp found nothing (it lands on
+            // its own hand edge): the world there barely moves in a fraction of a frame, so show
+            // it unwarped instead of a fill that streaks.
+            color = n.still;
+            reason = R_ROTATION;
         }
-    } else if (a.hit != b.hit) {
-        // Only one source saw this spot (screen edge, or uncovered behind something): use it.
-        color = a.hit ? a.color : b.color;
-        reason = a.hit ? a.reason : b.reason;
     } else {
-        // Neither: fill from the source nearer in time.
-        color = t >= 0.5 ? b.color : a.color;
-        reason = t >= 0.5 ? b.reason : a.reason;
+        // One frame builds the picture: the one nearer in time (B from halfway on). Choosing per
+        // pixel between A and B made edges a patchwork of both frames, which with a shader pack's
+        // TAA (soft, jittered edges that differ frame to frame) showed as every block edge
+        // shimmering. The other frame only fills what the main one could not see (uncovered
+        // behind a moving edge, or off its screen).
+        bool useB = t >= 0.5;
+        Warp p = useB ? b : a;
+        Warp o = useB ? a : b;
+        if (p.hit) {
+            color = p.color;
+            reason = p.reason;
+        } else if (o.hit) {
+            color = o.color;
+            reason = o.reason;
+        } else {
+            // Neither: fill from the main frame. Next to the held item (the search stepped past
+            // it) the unwarped world is steadier than the fill.
+            color = p.reason == R_PAST_HAND ? p.still : p.color;
+            reason = p.reason;
+        }
     }
 #endif
 

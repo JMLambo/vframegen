@@ -1,54 +1,100 @@
 # VFrameGen
 
-Frame generation for Minecraft **26.3** (Fabric) that works on the **Vulkan** renderer, as well as OpenGL.
+Frame generation for Minecraft **26.3** (Fabric) that works on the **Vulkan** renderer, as well as
+OpenGL, including with **Iris shader packs**, **Sodium** and **Distant Horizons**. It also has
+**render scale** upscaling.
 
-Other frame-generation mods call OpenGL directly. VFrameGen only uses Mojang's own renderer
-abstraction (`com.mojang.renderpearl`): textures, a render pipeline with a GLSL shader that the game
-compiles itself, and the window surface's `acquire → blit → present`. So it runs on any backend
-the game runs on.
+Other frame-generation mods call OpenGL directly. VFrameGen draws through Mojang's own renderer
+abstraction (`com.mojang.renderpearl`): textures, render pipelines with GLSL shaders the game
+compiles itself, and the window surface. On Vulkan it adds a few low-level hooks for exact frame
+pacing.
 
 ## How it works
 
-Every pass through the game loop it shows **one generated frame between two real frames** (2x).
+**Interpolated mode** (default, 2x to 6x). Each real frame is held back by one frame. The frames
+between the one on screen (A) and the held one (B) are built from both, then B is shown:
 
-1. While a real frame renders, it copies the world colour, the world depth (taken just before the
-   held item is drawn), the held item's depth, and the final image with the GUI.
-2. On the next loop, right after the new camera has been worked out and before the real frame
-   renders, it warps the previous frame to a camera pose **between** the two real frames, presents
-   it, and gets a fresh swapchain image for the real frame.
+1. While a real frame renders, VFrameGen copies the world colour and depth (taken just before the
+   held item is drawn), a mask of the held item, and the final image with the GUI.
+2. When the next real frame is finished, it warps A and B to cameras **between** them. This is a
+   depth-aware reprojection: a fixed-point search per pixel, and rotation only for the sky. One of
+   the two frames, the one nearer in time, builds the picture. The other only fills what that one
+   could not see.
+3. The camera between two frames blends position, rotation, projection and the view matrix's
+   offset, so view bobbing stays smooth.
+4. The held item and the GUI are not warped. They come from the frame nearer in time.
 
-The warp is a depth-aware reprojection (fixed-point search per pixel, starting from the
-rotation-only answer, which is exact for the sky). The camera pose is interpolated between real
-frames, not predicted, so there is no guesswork about input, but it does follow the real frames
-instead of getting ahead of them. The held item and the GUI are kept still rather than reprojected.
+**Low-latency mode.** Nothing is held. The last real frame is warped toward the camera of the
+frame about to render. This has less delay but is less accurate.
+
+### Pacing
+
+- **Vulkan, present thread** (default). The render thread renders everything and hands the final
+  `vkQueuePresentKHR` calls to a dedicated thread. That thread presents each real frame as soon as
+  it is ready. It then waits on the frame's GPU timeline semaphore to learn when that frame is
+  really on screen, and presents each generated frame at its exact share of the measured interval.
+  The queue and swapchain are shared under one lock. Generated frames are rendered right after the
+  real frame, never during world rendering, so shader packs are not disturbed.
+- **OpenGL, or present thread off.** Generated frames go out in Minecraft's frame-limiter sleep,
+  timed from a GPU fence, or else at the very start of the next loop. That needs idle time, so the
+  auto frame cap adapts real FPS until they fit.
+
+**Auto frame cap.** With Max Framerate on Unlimited, real FPS is capped at display refresh ÷
+multiplier, so no frame is produced that the screen cannot show. Some virtual displays (for example
+Sunshine streaming) report 60 Hz while running at 120. In that case set **Display refresh rate** by
+hand.
 
 ## Compatibility
 
-- **Sodium**: no conflict; Sodium changes chunk rendering, VFrameGen hooks the frame around it.
-- **Iris**: works. Shader packs replace the depth buffer, so with `depthMode=AUTO` frames are
-  reprojected by camera rotation only while a pack is on (exact when turning, approximate when
-  moving). Set `DEPTH` to try full reprojection with your pack.
-- **Distant Horizons**: LOD terrain that is not in the vanilla depth buffer is treated as distant
-  (rotation only), which is what it nearly is.
+- **Sodium**: works.
+- **Iris**: works with shader packs (tested with Complementary + Euphoria Patches). Depth
+  reprojection works with packs. The held item is masked by depth, because packs draw it
+  themselves.
+- **Distant Horizons**: works. LOD terrain reprojects with its depth.
+- **Controlify**: optional. It adds controller bindings for the toggle and the debug capture.
+- **Reflex**: not tested with the present thread yet.
+
+## Render scale
+
+**Upscaling → Render scale** (50–100%). The world and the shader pack render at a fraction of the
+window size. The image is then upscaled with an edge-aware bicubic filter followed by
+contrast-adaptive sharpening. The GUI stays at full resolution.
 
 ## Settings
 
 In game: **Mod Menu → VFrameGen** (needs Cloth Config), or `config/vframegen.properties`.
 Toggle key: **F9** (rebind under Controls → VFrameGen).
 
-- VSync caps the shown frame rate at your refresh rate, and real frames at half of it. Turn VSync
-  off, or use VRR/FreeSync, to get the most out of it.
-- The in-game frame rate limit applies to real frames. A limit of 60 shows ~120.
-- The F3 FPS counter counts real frames only; the log prints real / generated / shown every 5 s.
+- **General**: on/off, mode, multiplier (2–6x), depth mode, pacing, present thread (Vulkan,
+  needs a restart), auto frame cap, display refresh rate.
+- **Upscaling**: render scale and sharpening.
+- **Limits**: when not to generate frames (camera jumps, fast turns, very slow real frames).
+- **Quality**: sharpening of generated frames, GUI detection threshold.
+- **Debug** (all off by default): a magenta tint on generated frames, F8 captures (images and
+  validation frames go to `vframegen-debug/`), a rolling log of the last ~10 s of presented frames,
+  and stats, pacing and stall lines in the game log.
 
-## Limits (v0.1)
+The F3 screen shows `VFrameGen: N real + M generated`, and the FPS counter includes generated
+frames.
 
-- Fixed 2x. No 3x/4x yet.
-- Disocclusions (what was hidden behind something before you moved) are filled from neighbouring
-  pixels, so fast sideways motion can smear edges a little.
-- Transparent HUD parts (hotbar background, chat) show the world behind them as of the last
-  real frame.
+## Tips
+
+- **Turn VSync off.** The present thread does the pacing.
+- Leave **Max Framerate** on Unlimited and let the auto cap pick the real frame rate.
+- Hitches from Minecraft itself are amplified visually: with smooth frames on either side, a
+  40 ms stall looks like a jump. This happens while exploring new terrain (chunk meshes, Distant
+  Horizons LODs, shadow geometry). Pre-generating the world, lowering shadow distance or Distant
+  Horizons' CPU load, and a low-pause collector (`-XX:+UseZGC`) all help.
+
+## Limits
+
+- Interpolation adds about one real frame of latency.
+- Disocclusions (what was hidden behind something) are filled from neighbouring pixels, so fast
+  sideways motion can smear edges a little. Things that move on their own (waving leaves, water,
+  mobs) are only as smooth as the real frames.
+- Transparent HUD parts show the world behind them as of the nearer real frame.
 
 ## Building
 
-JDK 25, then `./gradlew build`. The jar is in `build/libs/`.
+JDK 25, then `./gradlew build`. The jar is in `build/libs/`. `./gradlew runClient` starts a dev
+client with Sodium, Iris and Distant Horizons from `run/mods`, and uses ZGC.

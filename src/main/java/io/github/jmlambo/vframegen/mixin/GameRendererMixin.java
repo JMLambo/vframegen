@@ -1,12 +1,15 @@
 package io.github.jmlambo.vframegen.mixin;
 
+import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import io.github.jmlambo.vframegen.FrameGenerator;
-import net.minecraft.client.Minecraft;
+import io.github.jmlambo.vframegen.RenderScale;
+import net.minecraft.client.renderer.state.WindowRenderState;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.state.OptionsRenderState;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.client.renderer.state.level.PlayerRenderState;
 import org.joml.Matrix4f;
+import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -37,23 +40,35 @@ public abstract class GameRendererMixin {
         FrameGenerator.INSTANCE.captureHandDepth((GameRenderer) (Object) this, useHudTarget);
     }
 
-    /** Checkpoint: the world is drawn (the bulk of a frame's work, with shaders). */
-    @Inject(method = "renderLevel", require = 0, at = @At(value = "INVOKE", shift = At.Shift.AFTER,
-            target = "Lnet/minecraft/client/renderer/LevelRenderer;render(Lcom/mojang/blaze3d/resource/GraphicsResourceAllocator;ZLnet/minecraft/client/renderer/state/level/CameraRenderState;Lcom/mojang/renderpearl/api/buffers/GpuBufferSlice;Lorg/joml/Vector4f;ZZ)V"))
-    private void vframegen$afterLevel(CallbackInfo ci) {
-        FrameGenerator.INSTANCE.checkpoint(FrameGenerator.Checkpoint.AFTER_LEVEL);
-    }
-
-    /** Checkpoint: about to draw the GUI. */
-    @Inject(method = "render", require = 0, at = @At(value = "INVOKE",
-            target = "Lnet/minecraft/client/gui/render/GuiRenderer;render()V"))
-    private void vframegen$beforeGui(CallbackInfo ci) {
-        FrameGenerator.INSTANCE.checkpoint(FrameGenerator.Checkpoint.BEFORE_GUI);
-    }
-
     @Inject(method = "render", at = @At(value = "INVOKE", shift = At.Shift.AFTER,
             target = "Lnet/minecraft/client/renderer/GameRenderer;applyPostEffects()V"))
     private void vframegen$afterWorld(CallbackInfo ci) {
-        FrameGenerator.INSTANCE.captureWorld((GameRenderer) (Object) this);
+        GameRenderer gr = (GameRenderer) (Object) this;
+        WindowRenderState window = gr.gameRenderState().windowRenderState;
+        RenderScale.upscaleAndSwap(gr, window.width, window.height);
+        FrameGenerator.INSTANCE.captureWorld(gr);
+    }
+
+    // Render scale: the main target (and with it the world, the shader pack and DH) follows the
+    // scaled window size. Only inside render(); the GUI still lays out for the real window.
+    @ModifyExpressionValue(method = "render", at = @At(value = "FIELD", opcode = Opcodes.GETFIELD,
+            target = "Lnet/minecraft/client/renderer/state/WindowRenderState;width:I"))
+    private int vframegen$scaledWidth(int width) {
+        return RenderScale.scaled(width);
+    }
+
+    @ModifyExpressionValue(method = "render", at = @At(value = "FIELD", opcode = Opcodes.GETFIELD,
+            target = "Lnet/minecraft/client/renderer/state/WindowRenderState;height:I"))
+    private int vframegen$scaledHeight(int height) {
+        return RenderScale.scaled(height);
+    }
+
+    /** No world this frame (menus): still give the GUI a full-size target. */
+    @Inject(method = "render", at = @At(value = "INVOKE",
+            target = "Lcom/mojang/renderpearl/api/commands/CommandEncoder;clearDepthTexture(Lcom/mojang/renderpearl/api/textures/GpuTexture;D)V"))
+    private void vframegen$beforeGuiDepthClear(CallbackInfo ci) {
+        GameRenderer gr = (GameRenderer) (Object) this;
+        WindowRenderState window = gr.gameRenderState().windowRenderState;
+        RenderScale.upscaleAndSwap(gr, window.width, window.height);
     }
 }

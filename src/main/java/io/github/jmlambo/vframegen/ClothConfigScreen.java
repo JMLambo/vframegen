@@ -44,9 +44,29 @@ final class ClothConfigScreen {
                 .setDefaultValue(def.pacing).setTooltip(tip("pacing"))
                 .setEnumNameProvider(v -> Component.translatable("vframegen.config.pacing." + v.name().toLowerCase()))
                 .setSaveConsumer(v -> cfg.pacing = v).build());
+        general.addEntry(e.startBooleanToggle(t("presentThread"), cfg.presentThread)
+                .setDefaultValue(def.presentThread).setTooltip(tip("presentThread")).requireRestart()
+                .setSaveConsumer(v -> cfg.presentThread = v).build());
+        general.addEntry(e.startBooleanToggle(t("autoCap"), cfg.autoCap)
+                .setDefaultValue(def.autoCap).setTooltip(tip("autoCap"))
+                .setSaveConsumer(v -> cfg.autoCap = v).build());
+        general.addEntry(e.startIntSlider(t("displayHz"), cfg.displayHz, 0, 360)
+                .setDefaultValue(def.displayHz).setTooltip(tip("displayHz"))
+                .setTextGetter(v -> v == 0 ? Component.translatable("vframegen.config.displayHz.auto") : Component.literal(v + " Hz"))
+                .setSaveConsumer(v -> cfg.displayHz = v).build());
         general.addEntry(e.startBooleanToggle(t("disableWhileScreenOpen"), cfg.disableWhileScreenOpen)
                 .setDefaultValue(def.disableWhileScreenOpen).setTooltip(tip("disableWhileScreenOpen"))
                 .setSaveConsumer(v -> cfg.disableWhileScreenOpen = v).build());
+
+        ConfigCategory upscaling = builder.getOrCreateCategory(Component.translatable("vframegen.config.upscaling"));
+        upscaling.addEntry(e.startIntSlider(t("renderScale"), (int) Math.round(cfg.renderScale * 100), 50, 100)
+                .setDefaultValue((int) Math.round(def.renderScale * 100)).setTooltip(tip("renderScale"))
+                .setTextGetter(v -> Component.literal(v + "%"))
+                .setSaveConsumer(v -> cfg.renderScale = v / 100.0).build());
+        upscaling.addEntry(e.startIntSlider(t("upscaleSharpness"), (int) Math.round(cfg.upscaleSharpness * 100), 0, 100)
+                .setDefaultValue((int) Math.round(def.upscaleSharpness * 100)).setTooltip(tip("upscaleSharpness"))
+                .setTextGetter(v -> Component.literal(v + "%"))
+                .setSaveConsumer(v -> cfg.upscaleSharpness = v / 100.0).build());
 
         ConfigCategory limits = builder.getOrCreateCategory(Component.translatable("vframegen.config.limits"));
         limits.addEntry(e.startDoubleField(t("maxCameraJumpBlocks"), cfg.maxCameraJumpBlocks)
@@ -66,9 +86,26 @@ final class ClothConfigScreen {
         quality.addEntry(e.startFloatField(t("guiDiffThreshold"), cfg.guiDiffThreshold)
                 .setDefaultValue(def.guiDiffThreshold).setMin(0).setMax(0.5f).setTooltip(tip("guiDiffThreshold"))
                 .setSaveConsumer(v -> cfg.guiDiffThreshold = v).build());
-        quality.addEntry(e.startBooleanToggle(t("debugTint"), cfg.debugTint)
+
+        ConfigCategory debug = builder.getOrCreateCategory(Component.translatable("vframegen.config.debug"));
+        debug.addEntry(e.startBooleanToggle(t("debugTint"), cfg.debugTint)
                 .setDefaultValue(def.debugTint).setTooltip(tip("debugTint"))
                 .setSaveConsumer(v -> cfg.debugTint = v).build());
+        debug.addEntry(e.startBooleanToggle(t("debugCaptures"), cfg.debugCaptures)
+                .setDefaultValue(def.debugCaptures).setTooltip(tip("debugCaptures"))
+                .setSaveConsumer(v -> cfg.debugCaptures = v).build());
+        debug.addEntry(e.startBooleanToggle(t("debugFrameLog"), cfg.debugFrameLog)
+                .setDefaultValue(def.debugFrameLog).setTooltip(tip("debugFrameLog"))
+                .setSaveConsumer(v -> cfg.debugFrameLog = v).build());
+        debug.addEntry(e.startBooleanToggle(t("debugStatsLog"), cfg.debugStatsLog)
+                .setDefaultValue(def.debugStatsLog).setTooltip(tip("debugStatsLog"))
+                .setSaveConsumer(v -> cfg.debugStatsLog = v).build());
+        debug.addEntry(e.startBooleanToggle(t("debugPacingLog"), cfg.debugPacingLog)
+                .setDefaultValue(def.debugPacingLog).setTooltip(tip("debugPacingLog"))
+                .setSaveConsumer(v -> cfg.debugPacingLog = v).build());
+        debug.addEntry(e.startBooleanToggle(t("debugStallLog"), cfg.debugStallLog)
+                .setDefaultValue(def.debugStallLog).setTooltip(tip("debugStallLog"))
+                .setSaveConsumer(v -> cfg.debugStallLog = v).build());
 
         return builder.build();
     }

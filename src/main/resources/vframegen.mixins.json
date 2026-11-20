@@ -7,9 +7,15 @@
     "DebugEntryFpsMixin",
     "GameRendererAccessor",
     "GameRendererMixin",
-    "LevelRendererMixin",
+    "GlTransientMemoryMixin",
     "MinecraftAccessor",
-    "MinecraftMixin"
+    "MinecraftMixin",
+    "RenderTargetAccessor",
+    "VulkanCommandEncoderMixin",
+    "VulkanQueueIdleMixin",
+    "VulkanQueueMixin",
+    "VulkanSurfaceMixin",
+    "VulkanTransientMemoryMixin"
   ],
   "injectors": {
     "defaultRequire": 1

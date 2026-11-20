@@ -9,10 +9,24 @@ base {
     archivesName = project.archives_base_name
 }
 
+loom {
+    runs {
+        client {
+            // Generational ZGC: garbage collection pauses of about a millisecond instead of 10-20 ms
+            // (those pauses showed up as hitches, very visible with frame generation on).
+            vmArgs "-XX:+UseZGC"
+        }
+    }
+}
+
 repositories {
     maven { url = 'https://maven.fabricmc.net/' }
     maven { url = 'https://maven.shedaniel.me/' }
     maven { url = 'https://maven.terraformersmc.com/releases/' }
+    exclusiveContent {
+        forRepository { maven { url = 'https://api.modrinth.com/maven' } }
+        filter { includeGroup 'maven.modrinth' }
+    }
 }
 
 dependencies {
@@ -34,6 +48,12 @@ dependencies {
     localRuntime("com.terraformersmc:modmenu:${project.modmenu_version}") {
         transitive = false
     }
+
+    // Optional: controller buttons through Controlify (its API at compile time; it and YACL,
+    // which it needs, in the dev client).
+    compileOnly("maven.modrinth:controlify:${project.controlify_version}") { transitive = false }
+    localRuntime("maven.modrinth:controlify:${project.controlify_version}") { transitive = false }
+    localRuntime("maven.modrinth:yacl:${project.yacl_version}") { transitive = false }
 }
 
 processResources {

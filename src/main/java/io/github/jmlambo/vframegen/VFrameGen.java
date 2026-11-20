@@ -5,6 +5,7 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.minecraft.client.KeyMapping;
+import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import org.slf4j.Logger;
@@ -32,25 +33,35 @@ public final class VFrameGen implements ClientModInitializer {
                 "key.vframegen.capture", InputConstants.Type.KEYBOARD, InputConstants.KEY_F8, category));
 
         ClientTickEvents.END_CLIENT_TICK.register(mc -> {
-            while (capture.consumeClick()) {
-                DebugCapture.request();
-                if (mc.player != null) {
-                    mc.player.sendOverlayMessage(Component.translatable("vframegen.capture"));
-                }
-            }
-            while (toggle.consumeClick()) {
-                config.enabled = !config.enabled;
-                config.save();
-                FrameGenerator.INSTANCE.invalidate();
-                if (mc.player != null) {
-                    mc.player.sendOverlayMessage(Component.translatable(
-                            config.enabled ? "vframegen.toggle.on" : "vframegen.toggle.off",
-                            FrameGenerator.INSTANCE.backendName()));
-                }
-            }
+            while (capture.consumeClick()) requestCapture(mc);
+            while (toggle.consumeClick()) toggle(mc);
         });
 
         LOGGER.info("VFrameGen loaded (enabled={}, depthMode={}, pacing={})",
                 config.enabled, config.depthMode, config.pacing);
+    }
+
+    /** F8, or the controller button: save the next burst of frames for debugging. */
+    public static void requestCapture(Minecraft mc) {
+        if (!config.debugCaptures && !config.debugFrameLog) {
+            if (mc.player != null) mc.player.sendOverlayMessage(Component.translatable("vframegen.capture.off"));
+            return;
+        }
+        DebugCapture.request();
+        if (mc.player != null) {
+            mc.player.sendOverlayMessage(Component.translatable("vframegen.capture"));
+        }
+    }
+
+    /** F9, or the controller button: frame generation on/off. */
+    public static void toggle(Minecraft mc) {
+        config.enabled = !config.enabled;
+        config.save();
+        FrameGenerator.INSTANCE.invalidate();
+        if (mc.player != null) {
+            mc.player.sendOverlayMessage(Component.translatable(
+                    config.enabled ? "vframegen.toggle.on" : "vframegen.toggle.off",
+                    FrameGenerator.INSTANCE.backendName()));
+        }
     }
 }

@@ -22,12 +22,52 @@ import java.nio.file.Path;
 public final class DebugCapture {
     private static boolean requested;
     private static Path dir;
+    private static boolean sequenceRequested;
 
     private DebugCapture() {
     }
 
     public static void request() {
-        requested = true;
+        requested = VFrameGen.config().debugCaptures;
+        sequenceRequested = VFrameGen.config().debugFrameLog;
+    }
+
+    /** An extra line in the sequence log (not a frame). */
+    static void sequenceNote(String text) {
+        if (!VFrameGen.config().debugFrameLog) return;
+        record(String.format(java.util.Locale.ROOT, "   t=%.2f ms %s", System.nanoTime() / 1e6 % 1_000_000, text));
+    }
+
+    // The last few seconds of presented frames are always kept (text only, cheap). F8 saves them,
+    // so what happened just before the key press is in the file.
+    private static final int RING = 2600; // about 10 s at 120 shown fps, plus notes
+    private static final java.util.ArrayDeque<String> ring = new java.util.ArrayDeque<>();
+    private static int frameNumber;
+
+    private static void record(String line) {
+        if (ring.size() >= RING) ring.pollFirst();
+        ring.addLast(line);
+    }
+
+    /** A frame is about to be presented. */
+    static void sequenceFrame(GpuTexture texture, String kind, String info) {
+        if (!VFrameGen.config().debugFrameLog) {
+            if (!ring.isEmpty()) ring.clear();
+            return;
+        }
+        record(String.format(java.util.Locale.ROOT, "%05d-%s t=%.2f ms %s", frameNumber++ % 100000, kind,
+                System.nanoTime() / 1e6 % 1_000_000, info));
+        if (!sequenceRequested) return;
+        sequenceRequested = false;
+        Path out = FabricLoader.getInstance().getGameDir().resolve("vframegen-debug")
+                .resolve(Util.getFilenameFormattedDateTime() + "-sequence");
+        try {
+            Files.createDirectories(out);
+            Files.writeString(out.resolve("sequence.txt"), String.join("\n", ring) + "\n");
+            VFrameGen.LOGGER.info("Saved the last {} presented frames to {}", ring.size(), out);
+        } catch (Exception e) {
+            VFrameGen.LOGGER.warn("Could not save the frame log", e);
+        }
     }
 
     /** Called when a burst of generated frames starts. True if this burst should be captured. */
@@ -65,6 +105,10 @@ public final class DebugCapture {
 
     /** Read a colour texture back from the GPU and write it as a PNG, asynchronously. */
     static void save(GpuTexture texture, String name) {
+        save(dir, texture, name);
+    }
+
+    private static void save(Path dir, GpuTexture texture, String name) {
         if (dir == null) return;
         GpuFormat format = texture.getFormat();
         if (format != GpuFormat.RGBA8_UNORM) {
