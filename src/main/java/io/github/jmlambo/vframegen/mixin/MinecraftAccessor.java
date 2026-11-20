@@ -9,6 +9,9 @@ public interface MinecraftAccessor {
     @Accessor("surfaceIsInvalid")
     void vframegen$setSurfaceIsInvalid(boolean invalid);
 
+    @Accessor("windowSurfaceNeedsReconfiguring")
+    void vframegen$setWindowSurfaceNeedsReconfiguring(boolean reconfigure);
+
     /** Vanilla's per-second frame counter, which becomes the F3 FPS. */
     @Accessor("frames")
     int vframegen$getFrames();

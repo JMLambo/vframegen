@@ -249,6 +249,16 @@ public final class FrameGenerator {
         return !broken && VFrameGen.config().enabled;
     }
 
+    /**
+     * Have vanilla recreate the swapchain at the next loop, as it does after a failed acquire.
+     * (Invalid alone only stops acquiring and presenting: nothing would ever reconfigure it.)
+     */
+    public static void recreateSurface(Minecraft mc) {
+        MinecraftAccessor acc = (MinecraftAccessor) mc;
+        acc.vframegen$setSurfaceIsInvalid(true);
+        acc.vframegen$setWindowSurfaceNeedsReconfiguring(true);
+    }
+
     private void fail(RuntimeException e) {
         broken = true;
         invalidate();
@@ -268,7 +278,7 @@ public final class FrameGenerator {
         frameWorldCaptured = false;
         building = null;
         if (presentThreadActive() && PresentThread.takeSurfaceLost()) {
-            ((MinecraftAccessor) mc).vframegen$setSurfaceIsInvalid(true);
+            recreateSurface(mc);
         }
         if (!active() || !interpolated() || !genPlanned || presentThreadActive()) return;
         // Generated frames that found no room in the frame limiter's sleep (no cap, or the game
@@ -440,7 +450,7 @@ public final class FrameGenerator {
                 try {
                     surface.acquireNextTexture();
                 } catch (SurfaceException e) {
-                    ((MinecraftAccessor) mc).vframegen$setSurfaceIsInvalid(true);
+                    recreateSurface(mc);
                     genPlanned = false;
                     return;
                 }
@@ -840,7 +850,7 @@ public final class FrameGenerator {
             return true;
         } catch (SurfaceException e) {
             // Same as vanilla: the surface is reconfigured next loop.
-            ((MinecraftAccessor) mc).vframegen$setSurfaceIsInvalid(true);
+            recreateSurface(mc);
             return false;
         }
     }
@@ -1273,7 +1283,7 @@ public final class FrameGenerator {
                 try {
                     surface.acquireNextTexture();
                 } catch (SurfaceException e) {
-                    ((MinecraftAccessor) mc).vframegen$setSurfaceIsInvalid(true);
+                    recreateSurface(mc);
                     return;
                 }
                 StallProbe.mark("gen acquire");
@@ -1299,7 +1309,7 @@ public final class FrameGenerator {
         } catch (RuntimeException e) {
             fail(e);
             // A swapchain image may still be acquired: have vanilla recreate the surface.
-            ((MinecraftAccessor) mc).vframegen$setSurfaceIsInvalid(true);
+            recreateSurface(mc);
         }
     }
 
