@@ -88,6 +88,7 @@ public final class FrameGenConfig {
     public static FrameGenConfig load() {
         FrameGenConfig c = new FrameGenConfig();
         Path p = path();
+        boolean readFailed = false;
         if (Files.exists(p)) {
             Properties props = new Properties();
             try (Reader r = Files.newBufferedReader(p)) {
@@ -115,10 +116,11 @@ public final class FrameGenConfig {
                 c.renderScale = Math.clamp(dbl(props, "renderScale", c.renderScale), 0.5, 1.0);
                 c.upscaleSharpness = Math.clamp(dbl(props, "upscaleSharpness", c.upscaleSharpness), 0.0, 1.0);
             } catch (IOException | RuntimeException e) {
-                VFrameGen.LOGGER.warn("Could not read {}, using defaults", p, e);
+                VFrameGen.LOGGER.warn("Could not read {}, using defaults without overwriting it", p, e);
+                readFailed = true;
             }
         }
-        c.save();
+        if (!readFailed) c.save();
         return c;
     }
 
@@ -153,7 +155,13 @@ public final class FrameGenConfig {
         values.forEach((k, v) -> out.append(k).append('=').append(v).append('\n'));
         try {
             Files.createDirectories(path().getParent());
-            Files.writeString(path(), out);
+            Path tmp = path().resolveSibling(path().getFileName() + ".tmp");
+            Files.writeString(tmp, out);
+            try {
+                Files.move(tmp, path(), java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+                Files.move(tmp, path(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
         } catch (IOException e) {
             VFrameGen.LOGGER.warn("Could not write {}", path(), e);
         }
@@ -168,7 +176,8 @@ public final class FrameGenConfig {
         String v = p.getProperty(k);
         if (v == null) return def;
         try {
-            return Double.parseDouble(v.trim());
+            double d = Double.parseDouble(v.trim());
+            return Double.isFinite(d) ? d : def;
         } catch (NumberFormatException e) {
             return def;
         }
