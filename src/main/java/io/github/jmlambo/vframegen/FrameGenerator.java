@@ -62,6 +62,8 @@ import java.util.concurrent.locks.LockSupport;
 public final class FrameGenerator {
     public static final FrameGenerator INSTANCE = new FrameGenerator();
 
+    /** With a shader pack, anything nearer than this (blocks) is taken to be the held item. */
+    private static final float LOCKED_DISTANCE = 0.5f;
     private static final int UBO_SIZE = 4 * 64 + 3 * 16;
 
     // --- GPU resources --------------------------------------------------------------------------
@@ -80,6 +82,9 @@ public final class FrameGenerator {
     private boolean histHasFinal;
     private boolean histHasHand;
     private boolean histDepthUsable;
+    private boolean histFirstPerson;
+    private boolean debugView;
+    private final StringBuilder captureLog = new StringBuilder();
     private final Vector3d histPos = new Vector3d();
     private final Matrix4f histViewRot = new Matrix4f();
     private final Matrix4f histProj = new Matrix4f();
@@ -101,6 +106,10 @@ public final class FrameGenerator {
     private long blockedNs;
     private long lastLoopBlockedNs;
     private long blockStartNs;
+    private long lastAnyPresentNs;
+    private double gapSumMs;
+    private double gapMaxMs;
+    private int gapCount;
     private long statsStartNs;
     private int statsReal;
     private int statsGenerated;
@@ -213,21 +222,45 @@ public final class FrameGenerator {
         Quaternionf qHist = new Quaternionf(q0);
         Quaternionf qCur = new Quaternionf(q1);
         Vector3d curPos = new Vector3d(cam.pos.x, cam.pos.y, cam.pos.z);
+        boolean capture = DebugCapture.begin();
+        if (capture) {
+            DebugCapture.save(finalTex, "0-real");
+            captureLog.setLength(0);
+            captureLog.append(String.format(java.util.Locale.ROOT,
+                    "multiplier=%d realLoopMs=%.2f emaLoopMs=%.2f emaLatencyMs=%.2f blockedMs=%.2f depth=%s iris=%s hand=%s firstPerson=%s%n",
+                    extra + 1, loopNs / 1e6, emaLoopNs / 1e6, emaLatencyNs / 1e6, lastLoopBlockedNs / 1e6,
+                    histDepthUsable, Compat.irisShadersActive(), histHasHand, histFirstPerson));
+        }
+        Vector3d lastPos = null;
         for (int k = 1; k <= extra; k++) {
             waitBudget -= pace(cfg, k / (double) (extra + 1), waitBudget);
 
-            // Pose: real frames show a camera that is emaLatency old by the time they are on
-            // screen. Show each generated frame with the same delay, which puts it between the
-            // two real poses.
+            // Pose: frame k of N sits k/N of the way from the last real camera to the next one.
+            // Fixed steps, not a timing estimate, so the motion is even.
             long now = System.nanoTime();
-            double f = Math.clamp((now - emaLatencyNs - histExtractNs) / (double) loopNs, 0.0, 1.0);
+            double f = k / (double) (extra + 1);
 
             Vector3d dstPos = new Vector3d(histPos).lerp(curPos, f);
             qHist.slerp(qCur, (float) f, q1);
             dstViewRot.rotation(q1);
             lerp(histProj, curProj, (float) f, dstProj);
 
-            if (!renderAndPresent(mc, surface, dstPos)) break;
+            if (capture) {
+                captureLog.append(String.format(java.util.Locale.ROOT,
+                        "gen %d: sinceRealPresentMs=%.2f f=%.3f slot=%.3f%n",
+                        k, (now - lastRealPresentNs) / 1e6, f, k / (double) (extra + 1)));
+            }
+            lastPos = dstPos;
+            boolean ok = renderAndPresent(mc, surface, dstPos);
+            if (capture) DebugCapture.save(outTex, k + "-generated");
+            if (!ok) break;
+        }
+        if (capture && lastPos != null) {
+            // Same pose as the last generated frame, drawn as the debug view (not shown on screen).
+            debugView = true;
+            renderPass(lastPos);
+            debugView = false;
+            DebugCapture.save(outTex, "8-debug-view");
         }
     }
 
@@ -273,6 +306,30 @@ public final class FrameGenerator {
 
     /** @return false when no swapchain image could be acquired afterwards */
     private boolean renderAndPresent(Minecraft mc, GpuSurface surface, Vector3d dstPos) {
+        CommandEncoder encoder = renderPass(dstPos);
+        surface.blitFromTexture(encoder, outView);
+        encoder.submit();
+        surface.present();
+        notePresent();
+        statsGenerated++;
+        secGenerated++;
+        // Count it in vanilla's FPS (F3 and anything that reads Minecraft.getFps()).
+        MinecraftAccessor counter = (MinecraftAccessor) mc;
+        counter.vframegen$setFrames(counter.vframegen$getFrames() + 1);
+
+        try {
+            surface.acquireNextTexture();
+            return true;
+        } catch (SurfaceException e) {
+            // Same as vanilla: the frame is skipped and the surface reconfigured next loop.
+            ((MinecraftAccessor) mc).vframegen$setSurfaceIsInvalid(true);
+            invalidate();
+            return false;
+        }
+    }
+
+    /** Draw the reprojected frame for camera position dstPos (and dstViewRot / dstProj) into outTex. */
+    private CommandEncoder renderPass(Vector3d dstPos) {
         FrameGenConfig cfg = VFrameGen.config();
         GpuDevice device = RenderSystem.getDevice();
         CommandEncoder encoder = device.createCommandEncoder();
@@ -287,10 +344,13 @@ public final class FrameGenerator {
                 (float) (histPos.x - dstPos.x), (float) (histPos.y - dstPos.y), (float) (histPos.z - dstPos.z));
 
         boolean reversedZ = ndcDepthAt(histProj, 1.0f) > ndcDepthAt(histProj, 100.0f);
+        boolean irisShaders = Compat.irisShadersActive();
+        // Iris draws the held item itself, so vanilla's hand buffers mean nothing with a pack on.
+        boolean handMask = histHasHand && !irisShaders;
         boolean useDepth = histDepthUsable && switch (cfg.depthMode) {
             case DEPTH -> true;
             case ROTATION_ONLY -> false;
-            case AUTO -> !Compat.irisShadersActive();
+            case AUTO -> !irisShaders;
         };
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -299,9 +359,10 @@ public final class FrameGenerator {
                     .putMat4f(dstViewProj)
                     .putMat4f(srcViewProjRot)
                     .putMat4f(dstInvViewProjRot)
-                    .putVec4(histHasHand ? 1f : 0f, cfg.guiDiffThreshold, useDepth ? 1f : 0f, cfg.debugTint ? 1f : 0f)
+                    .putVec4(handMask ? 1f : 0f, cfg.guiDiffThreshold, useDepth ? 1f : 0f, cfg.debugTint ? 1f : 0f)
                     .putVec4(reversedZ ? 1f : 0f, cfg.sharpness, 1f / width, 1f / height)
-                    .putVec4(zeroToOne ? 1f : 0f, 0f, 0f, 0f)
+                    .putVec4(zeroToOne ? 1f : 0f, !handMask && histFirstPerson && useDepth ? 1f : 0f,
+                            depthAt(histProj, LOCKED_DISTANCE, zeroToOne), debugView ? 1f : 0f)
                     .get();
             encoder.writeToBuffer(ubo.slice(), data);
         }
@@ -318,25 +379,13 @@ public final class FrameGenerator {
             pass.setUniform("FrameGen", ubo);
             pass.draw(3, 1, 0, 0);
         }
+        return encoder;
+    }
 
-        surface.blitFromTexture(encoder, outView);
-        encoder.submit();
-        surface.present();
-        statsGenerated++;
-        secGenerated++;
-        // Count it in vanilla's FPS (F3 and anything that reads Minecraft.getFps()).
-        MinecraftAccessor counter = (MinecraftAccessor) mc;
-        counter.vframegen$setFrames(counter.vframegen$getFrames() + 1);
-
-        try {
-            surface.acquireNextTexture();
-            return true;
-        } catch (SurfaceException e) {
-            // Same as vanilla: the frame is skipped and the surface reconfigured next loop.
-            ((MinecraftAccessor) mc).vframegen$setSurfaceIsInvalid(true);
-            invalidate();
-            return false;
-        }
+    /** Depth-buffer value at distance d in front of the camera, for projection proj. */
+    private float depthAt(Matrix4f proj, float d, boolean zeroToOne) {
+        float ndc = ndcDepthAt(proj, d);
+        return zeroToOne ? ndc : ndc * 0.5f + 0.5f;
     }
 
     private float ndcDepthAt(Matrix4f proj, float distance) {
@@ -417,6 +466,7 @@ public final class FrameGenerator {
         CameraRenderState cam = gr.gameRenderState().levelRenderState.cameraRenderState;
         histPos.set(cam.pos.x, cam.pos.y, cam.pos.z);
         histViewRot.set(cam.viewRotationMatrix);
+        histFirstPerson = cam.isFirstPerson;
         if (frameProjCaptured) {
             histProj.set(frameProj);
         } else {
@@ -441,6 +491,11 @@ public final class FrameGenerator {
         if (main.width != width || main.height != height) {
             invalidate();
             return;
+        }
+        if (DebugCapture.active()) {
+            DebugCapture.save(main.getColorTexture(), "9-real-next");
+            DebugCapture.writeLog(captureLog.toString());
+            DebugCapture.end();
         }
         copy(main.getColorTexture(), finalTex);
         histHasFinal = true;
@@ -472,7 +527,7 @@ public final class FrameGenerator {
         releaseTextures();
         GpuDevice device = RenderSystem.getDevice();
         int sampled = GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING;
-        worldTex = device.createTexture("VFrameGen world", sampled, color, w, h, 1, 1);
+        worldTex = device.createTexture("VFrameGen world", sampled | GpuTexture.USAGE_COPY_SRC, color, w, h, 1, 1);
         finalTex = device.createTexture("VFrameGen final", sampled, color, w, h, 1, 1);
         noHandTex = device.createTexture("VFrameGen world without hand", sampled, color, w, h, 1, 1);
         depthTex = device.createTexture("VFrameGen depth", sampled, depth, w, h, 1, 1);
@@ -524,7 +579,21 @@ public final class FrameGenerator {
         }
     }
 
+    private void notePresent() {
+        long now = System.nanoTime();
+        if (lastAnyPresentNs != 0) {
+            double gap = (now - lastAnyPresentNs) / 1e6;
+            if (gap < 250) {
+                gapSumMs += gap;
+                gapMaxMs = Math.max(gapMaxMs, gap);
+                gapCount++;
+            }
+        }
+        lastAnyPresentNs = now;
+    }
+
     public void afterRealPresent() {
+        notePresent();
         long now = System.nanoTime();
         if (lastRealPresentNs != 0) {
             emaLoopNs = ema(emaLoopNs, now - lastRealPresentNs);
@@ -547,12 +616,17 @@ public final class FrameGenerator {
         if (statsStartNs == 0) statsStartNs = now;
         if (now - statsStartNs >= 5_000_000_000L) {
             double secs = (now - statsStartNs) / 1e9;
-            VFrameGen.LOGGER.info("Real {} fps, generated {} fps, shown {} fps ({}){}{}",
+            VFrameGen.LOGGER.info("Real {} fps, generated {} fps, shown {} fps ({}), frame gap avg {} ms max {} ms{}{}",
                     Math.round(statsReal / secs), Math.round(statsGenerated / secs),
                     Math.round((statsReal + statsGenerated) / secs), backendName(),
+                    String.format(java.util.Locale.ROOT, "%.1f", gapCount == 0 ? 0 : gapSumMs / gapCount),
+                    String.format(java.util.Locale.ROOT, "%.1f", gapMaxMs),
                     statsSkips.isEmpty() ? "" : ", skipped " + statsSkips,
                     broken ? " [disabled after error]" : "");
             statsSkips.clear();
+            gapSumMs = 0;
+            gapMaxMs = 0;
+            gapCount = 0;
             statsStartNs = now;
             statsReal = 0;
             statsGenerated = 0;

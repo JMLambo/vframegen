@@ -33,5 +33,7 @@
   "vframegen.config.guiDiffThreshold": "GUI detection threshold",
   "vframegen.config.guiDiffThreshold.tooltip": "How much the GUI pass must change a pixel for it to be kept still instead of reprojected.",
   "vframegen.config.debugTint": "Tint generated frames",
-  "vframegen.config.debugTint.tooltip": "Tints generated frames magenta, to see which frames are generated."
+  "vframegen.config.debugTint.tooltip": "Tints generated frames magenta, to see which frames are generated.",
+  "key.vframegen.capture": "Capture debug frames",
+  "vframegen.capture": "VFrameGen: frames saved to vframegen-debug"
 }

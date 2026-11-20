@@ -28,7 +28,16 @@ public final class VFrameGen implements ClientModInitializer {
         KeyMapping toggle = KeyMappingHelper.registerKeyMapping(new KeyMapping(
                 "key.vframegen.toggle", InputConstants.Type.KEYBOARD, InputConstants.KEY_F9, category));
 
+        KeyMapping capture = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+                "key.vframegen.capture", InputConstants.Type.KEYBOARD, InputConstants.KEY_F8, category));
+
         ClientTickEvents.END_CLIENT_TICK.register(mc -> {
+            while (capture.consumeClick()) {
+                DebugCapture.request();
+                if (mc.player != null) {
+                    mc.player.sendOverlayMessage(Component.translatable("vframegen.capture"));
+                }
+            }
             while (toggle.consumeClick()) {
                 config.enabled = !config.enabled;
                 config.save();
