@@ -1,0 +1,86 @@
+language: en-US
+early_access: false
+tone_instructions: >-
+  Prioritize actionable correctness, threading, GPU synchronization, and runtime
+  regressions. Keep feedback concise. Do not request explanatory code comments;
+  preserve license headers and mixin/compiler-consumed annotations.
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  high_level_summary_in_walkthrough: true
+  poem: false
+  sequence_diagrams: false
+  tools:
+    github-checks:
+      enabled: false
+  auto_review:
+    enabled: true
+    # Also review the whole-mod review pull requests, which target review-base.
+    base_branches: ["review-base"]
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 0
+    drafts: true
+  pre_merge_checks:
+    docstrings:
+      mode: "off"
+    title:
+      mode: "off"
+    description:
+      mode: "off"
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
+    simplify:
+      enabled: false
+    autofix:
+      enabled: false
+    fix_ci:
+      enabled: false
+    resolve_merge_conflict:
+      enabled: false
+  path_instructions:
+    - path: "**/*"
+      instructions: >-
+        For cleanup changes, compare executable behavior against the PR merge
+        base. Check for removed guards, changed return values, and silently
+        dropped fallbacks (OpenGL backend, present thread off, shader packs off).
+        A passing Gradle build alone does not establish behavior preservation:
+        rendering and pacing changes need in-game testing. Avoid style-only or
+        comment-coverage requests.
+    - path: "src/main/java/**"
+      instructions: >-
+        This code runs on Minecraft's render thread every frame, plus a Vulkan
+        present thread (PresentThread). Check per-frame allocations and logging
+        (must be gated by Debug options), shared state between the two threads,
+        and that every vkQueueSubmit/vkQueuePresentKHR/acquire and swapchain
+        recreation stays under PresentThread.LOCK and drains pending presents.
+        Never leave a swapchain image acquired on paths that return early or
+        throw. Check frame-slot ownership (shown, held, building) and that frames
+        are never shown out of order. Nothing may be drawn or submitted while the
+        world or a shader pack is rendering.
+    - path: "src/main/java/**/mixin/**"
+      instructions: >-
+        Check mixin targets and descriptors against Minecraft 26.3 (mojmap) and
+        the renderpearl backend; injection points into Vulkan classes are fragile.
+        Prefer require = 0 only where a missing target degrades gracefully, and
+        verify @WrapOperation calls the original exactly once.
+    - path: "src/main/resources/assets/vframegen/shaders/**"
+      instructions: >-
+        Review the reprojection math (reversed and zero-to-one depth, projection
+        and view matrices, sky handling), sampler bounds and NaN/division guards,
+        and uniform block layout matching the Std140 writers in Java. Check that
+        the held-item mask and GUI handling still avoid warping the hand and HUD.
+    - path: "src/main/resources/**"
+      instructions: >-
+        Keep lang keys in sync with ClothConfigScreen and FrameGenConfig, mixin
+        lists in sync with the mixin classes, and fabric.mod.json dependency
+        ranges correct for the supported Minecraft version.
+    - path: ".github/workflows/**"
+      instructions: >-
+        Check job permissions, triggers, the tag/mod_version check, artifact
+        paths, and release conditions (pre-releases for suffixed tags). Verify
+        checks apply to the current PR head and keep review configuration
+        advisory.
