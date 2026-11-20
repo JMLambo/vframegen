@@ -40,7 +40,7 @@ Requires Java 25, which Minecraft 26.3 already uses.
 | Minecraft | 26.3, Fabric Loader 0.19.5+ |
 | Backend | Vulkan (present thread). OpenGL builds and runs, but has been tested much less. |
 | GPU / OS | NVIDIA RTX 4050 Laptop, Linux (Fedora, KDE Wayland) |
-| Mods | Sodium 0.9.3-beta.4, Iris 1.12 (a local build with Distant Horizons 3.4 support), Distant Horizons 3.4.0-RC2, Controlify 3.5.3 |
+| Mods | Sodium 0.9.3-beta.4, Iris 1.12 (a local build with Distant Horizons 3.4 support), Distant Horizons 3.4.0-RC2, Controlify 3.5.3, Reflex 1.1.6 |
 | Shader pack | Complementary Unbound r5.10 + Euphoria Patches 1.11.2 |
 
 Reports from other GPUs (AMD, Intel), Windows, and other shader packs are very welcome.
@@ -88,7 +88,8 @@ hand.
   themselves.
 - **Distant Horizons**: works. LOD terrain reprojects with its depth.
 - **Controlify**: optional. It adds controller bindings for the toggle and the debug capture.
-- **Reflex**: not tested with the present thread yet.
+- **Reflex**: works with the present thread, and recommended: it noticeably cuts input lag with
+  frame generation on.
 
 ## Render scale
 
@@ -117,6 +118,8 @@ frames.
 
 - **Turn VSync off.** The present thread does the pacing.
 - Leave **Max Framerate** on Unlimited and let the auto cap pick the real frame rate.
+- Install [Reflex AntiLag](https://www.curseforge.com/minecraft/mc-mods/reflex-antilag) to cut input lag. Interpolation still adds about
+  one real frame, so a lower multiplier (higher real frame rate) also feels more responsive.
 - Hitches from Minecraft itself are amplified visually: with smooth frames on either side, a
   40 ms stall looks like a jump. This happens while exploring new terrain (chunk meshes, Distant
   Horizons LODs, shadow geometry). Pre-generating the world, lowering shadow distance or Distant
@@ -134,7 +137,7 @@ frames.
 - Transparent HUD parts show the world behind them as of the nearer real frame.
 - The GUI is not warped, so HUD elements that turn with the camera (the F3 axis gizmo) only
   update at the real frame rate and trail behind the world while turning.
-- OpenGL, AMD/Intel GPUs, Windows, and Reflex with the present thread have barely been tested.
+- OpenGL, AMD/Intel GPUs and Windows have barely been tested.
 
 ## Building
 
