@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.0-alpha.2
+
+- Much higher real frame rate at 3x and above with the present thread: the swapchain now has
+  enough images for a real frame and all its generated frames (4x: about 30 → 44 real fps).
+- Changing the multiplier in the settings recreates the swapchain.
+- Fixed a frozen picture after the swapchain had to be recreated (for example after a failed
+  frame generation), while the game kept running.
+- Reprojection: no false matches from behind the camera after large turns, steadier depth edges,
+  no copies of the held item at the screen edge, and a gap-free held-item mask.
+- Auto frame cap rounds down and never exceeds refresh ÷ multiplier.
+- Settings: an unreadable file is no longer overwritten, saves are atomic, invalid numbers fall
+  back to defaults, and the refresh-rate slider goes to 500 Hz.
+- No longer loads on Minecraft 26.4 snapshots.
+- Reflex AntiLag works with the present thread and is recommended for lower input lag.
+
 ## 0.1.0-alpha.1
 
 First pre-release.
