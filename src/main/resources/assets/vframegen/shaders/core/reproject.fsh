@@ -67,16 +67,16 @@ float nearness(float d) {
 
 // The view ray through an output pixel, mapped into a source frame. Two points on the ray, not
 // one: view bobbing puts a small translation into the projection matrix.
-vec2 projectDirection(vec2 uvDst, mat4 srcViewProjRot) {
+// z is 0 when the direction is behind the source camera: not in that frame at all.
+vec3 projectDirection(vec2 uvDst, mat4 srcViewProjRot) {
     vec2 ndc = uvDst * 2.0 - 1.0;
     vec4 a = DstInvViewProjRot * vec4(ndc, 1.0, 1.0);
     vec4 b = DstInvViewProjRot * vec4(ndc, 0.5, 1.0);
     vec3 dir = b.xyz / b.w - a.xyz / a.w;
     if (Params2.x < 0.5) dir = -dir; // without reversed Z, NDC z = 1 is the far end
     vec4 clip = srcViewProjRot * vec4(dir, 0.0);
-    // Behind the source camera: not in that frame at all.
-    if (clip.w <= 1.0e-6) return vec2(-1.0);
-    return (clip.xy / clip.w) * 0.5 + 0.5;
+    if (clip.w <= 1.0e-6) return vec3(-1.0, -1.0, 0.0);
+    return vec3((clip.xy / clip.w) * 0.5 + 0.5, 1.0);
 }
 
 // Where a source pixel lands in the output. z is 0 when it lands behind the output camera (or the
@@ -127,8 +127,12 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
         return w;
     }
 
-    vec2 skyUv = projectDirection(uvDst, viewProjRot);
-    vec2 uvSrc = skyUv;
+    vec3 skyDir = projectDirection(uvDst, viewProjRot);
+    vec2 skyUv = skyDir.xy;
+    // Behind the source camera there is no rotation answer: no seed from it, no sky sample, and a
+    // pixel with no match falls back to the unwarped one. (Merely off screen is still searched.)
+    bool skyBehind = skyDir.z < 0.5;
+    vec2 uvSrc = skyBehind ? uvDst : skyUv;
     bool contested = false;
     w.reason = R_ROTATION;
     if (flags.w > 0.5) {
@@ -140,13 +144,10 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
         float bestHitNear = 0.0;
         bool haveHit = false;
         float minHitNear = 2.0, maxHitNear = -2.0;
-        // Sky behind the source camera (projectDirection's off-frame sentinel): there is no sky
-        // sample to use, so the fill falls back to the unwarped pixel.
-        bool skyOff = offscreen(skyUv);
-        vec2 bestMiss = skyOff ? uvDst : skyUv;
+        vec2 bestMiss = skyBehind ? uvDst : skyUv;
         float bestMissNear = 0.0;
         bool haveMiss = false;
-        for (int chain = skyOff ? 1 : 0; chain < 2; chain++) {
+        for (int chain = skyBehind ? 1 : 0; chain < 2; chain++) {
             vec2 uv = chain == 0 ? skyUv : uvDst;
             for (int i = 0; i < 6; i++) {
                 vec2 uvc = clamp(uv, 0.0, 1.0);
@@ -158,7 +159,7 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
                 float errPx = length((landed - uvDst) * screen);
                 float near = sky ? -1.0 : nearness(d);
                 vec2 cand = sky ? skyUv : uvc;
-                if (sky && skyOff) break; // not a usable sample
+                if (sky && skyBehind) break; // not a usable sample
                 if (errPx < 1.0) {
                     // Matches at different depths: an edge, whatever order they were found in.
                     minHitNear = min(minHitNear, near);
@@ -183,7 +184,7 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
         w.hit = haveHit;
         w.reason = haveHit ? R_HIT : R_FILL;
     }
-    if (offscreen(skyUv) && offscreen(uvSrc)) {
+    if ((offscreen(skyUv) && offscreen(uvSrc)) || (skyBehind && w.reason == R_ROTATION)) {
         w.hit = false;
         w.reason = R_OFFSCREEN;
     }
