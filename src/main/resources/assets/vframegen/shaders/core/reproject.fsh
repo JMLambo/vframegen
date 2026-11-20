@@ -35,8 +35,14 @@ bool isSky(float d) {
 
 
 vec2 projectDirection(vec2 uvDst) {
-    vec4 dir = DstInvViewProjRot * vec4(uvDst * 2.0 - 1.0, 1.0, 1.0);
-    vec4 clip = SrcViewProjRot * vec4(dir.xyz / dir.w, 0.0);
+    // The view ray through this pixel, as the difference of two points on it. (A single point is
+    // not a direction: view bobbing puts a small translation in the projection matrix.)
+    vec2 ndc = uvDst * 2.0 - 1.0;
+    vec4 a = DstInvViewProjRot * vec4(ndc, 1.0, 1.0);
+    vec4 b = DstInvViewProjRot * vec4(ndc, 0.5, 1.0);
+    vec3 dir = b.xyz / b.w - a.xyz / a.w;
+    if (Params2.x < 0.5) dir = -dir; // without reversed Z, NDC z = 1 is the far end
+    vec4 clip = SrcViewProjRot * vec4(dir, 0.0);
     return (clip.xy / clip.w) * 0.5 + 0.5;
 }
 
@@ -75,20 +81,60 @@ void main() {
         return;
     }
 
-    vec2 uvSrc = projectDirection(uvDst);
+    vec2 skyUv = projectDirection(uvDst);
+    vec2 uvSrc = skyUv;
+    bool contested = false;
     if (Params.z > 0.5) {
-        for (int i = 0; i < 6; i++) {
-            float d = texture(DepthSampler, clamp(uvSrc, 0.0, 1.0)).r;
-            if (isSky(d)) {
-                uvSrc = projectDirection(uvDst);
-                break;
+        // Two searches: one from the rotation-only answer, one from "nothing moved". Every step is
+        // a candidate. A candidate that lands within a pixel of this one is a real match, and of
+        // those the nearest is visible (it is in front). With no match at all, this pixel was
+        // hidden in the last frame, so it is filled from the farthest candidate, the background,
+        // instead of stretching the foreground over it.
+        vec2 screen = 1.0 / Params2.zw;
+        vec2 bestHit = skyUv;
+        float bestHitDepth = 0.0;
+        bool haveHit = false;
+        vec2 bestMiss = skyUv;
+        float bestMissDepth = 0.0;
+        bool haveMiss = false;
+
+        for (int chain = 0; chain < 2; chain++) {
+            vec2 uv = chain == 0 ? skyUv : uvDst;
+            for (int i = 0; i < 6; i++) {
+                vec2 uvc = clamp(uv, 0.0, 1.0);
+                float d = texture(DepthSampler, uvc).r;
+                bool sky = isSky(d);
+                vec2 landed = sky ? uvDst + (uvc - skyUv) : landingSpot(uvc, d);
+                float errPx = length((landed - uvDst) * screen);
+                // Depth as "nearness": bigger is nearer, whichever way the depth buffer runs.
+                float near = sky ? -1.0 : (Params2.x > 0.5 ? d : 1.0 - d);
+                vec2 cand = sky ? skyUv : uvc;
+                if (errPx < 1.0) {
+                    if (!haveHit || near > bestHitDepth) {
+                        if (haveHit && abs(near - bestHitDepth) > 1.0e-4) contested = true;
+                        bestHit = cand;
+                        bestHitDepth = near;
+                        haveHit = true;
+                    }
+                } else if (!haveMiss || near < bestMissDepth) {
+                    bestMiss = cand;
+                    bestMissDepth = near;
+                    haveMiss = true;
+                }
+                if (sky) break;
+                uv += uvDst - landed;
             }
-            vec2 landed = landingSpot(uvSrc, d);
-            uvSrc += uvDst - landed;
         }
+        uvSrc = haveHit ? bestHit : bestMiss;
+        contested = contested || !haveHit;
     }
 
     vec2 uv = clamp(uvSrc, vec2(0.0), vec2(1.0));
+    if (contested) {
+        // At a depth edge, bilinear filtering would blend foreground into background: snap to a texel.
+        vec2 size = 1.0 / Params2.zw;
+        uv = (floor(uv * size) + 0.5) / size;
+    }
     vec3 color = sharpen(uv, texture(WorldSampler, uv).rgb);
     if (Params.w > 0.5) {
         color = mix(color, vec3(1.0, 0.0, 1.0), 0.15);

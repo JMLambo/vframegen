@@ -104,6 +104,7 @@ public final class FrameGenerator {
     private long statsStartNs;
     private int statsReal;
     private int statsGenerated;
+    private final java.util.TreeMap<String, Integer> statsSkips = new java.util.TreeMap<>();
 
     // --- scratch --------------------------------------------------------------------------------
     private final Matrix4f m0 = new Matrix4f();
@@ -154,39 +155,40 @@ public final class FrameGenerator {
 
     private void tryGenerate(Minecraft mc) {
         FrameGenConfig cfg = VFrameGen.config();
-        if (!histValid || !histHasFinal) return;
+        if (!histValid || !histHasFinal) { skip(histValid ? "no-final" : "no-history"); return; }
         if (mc.level == null || mc.player == null || mc.level != histLevel) {
             invalidate();
+            skip("level");
             return;
         }
-        if (mc.isPaused()) return;
-        if (cfg.disableWhileScreenOpen && mc.gui.screen() != null) return;
+        if (mc.isPaused()) { skip("paused"); return; }
+        if (cfg.disableWhileScreenOpen && mc.gui.screen() != null) { skip("screen"); return; }
 
         GpuSurface surface = mc.windowSurface();
-        if (!surface.isAcquired()) return;
+        if (!surface.isAcquired()) { skip("not-acquired"); return; }
 
         GameRenderer gr = mc.gameRenderer;
         GameRenderState state = gr.gameRenderState();
-        if (!state.shouldRenderLevel) return;
+        if (!state.shouldRenderLevel) { skip("no-level"); return; }
         RenderTarget main = gr.mainRenderTarget();
-        if (main.width != width || main.height != height) return;
+        if (main.width != width || main.height != height) { skip("size"); return; }
 
         CameraRenderState cam = state.levelRenderState.cameraRenderState;
         PlayerRenderState player = state.levelRenderState.playerRenderState;
-        if (cam == null || !cam.initialized || cam.isPanoramicMode) return;
-        if (player.nauseaEffectIntensity > 0 || player.portalEffectIntensity > 0) return;
+        if (cam == null || !cam.initialized || cam.isPanoramicMode) { skip("camera"); return; }
+        if (player.nauseaEffectIntensity > 0 || player.portalEffectIntensity > 0) { skip("nausea"); return; }
 
         long loopNs = frameExtractNs - histExtractNs;
-        if (loopNs <= 0 || loopNs > cfg.maxRealFrameAgeMs * 1_000_000L) return;
+        if (loopNs <= 0 || loopNs > cfg.maxRealFrameAgeMs * 1_000_000L) { skip(loopNs <= 0 ? "same-frame" : "slow-frame"); return; }
 
         double jumpX = cam.pos.x - histPos.x, jumpY = cam.pos.y - histPos.y, jumpZ = cam.pos.z - histPos.z;
         double jump = Math.sqrt(jumpX * jumpX + jumpY * jumpY + jumpZ * jumpZ);
-        if (jump > cfg.maxCameraJumpBlocks) return;
+        if (jump > cfg.maxCameraJumpBlocks) { skip("jump"); return; }
 
         histViewRot.getNormalizedRotation(q0);
         cam.viewRotationMatrix.getNormalizedRotation(q1);
         double turnDeg = Math.toDegrees(2.0 * Math.acos(Math.min(1.0, Math.abs(q0.dot(q1)))));
-        if (cfg.maxCameraTurnDegrees > 0 && turnDeg > cfg.maxCameraTurnDegrees) return;
+        if (cfg.maxCameraTurnDegrees > 0 && turnDeg > cfg.maxCameraTurnDegrees) { skip("turn"); return; }
 
         // The projection the coming real frame will use (view bobbing included).
         currentProjection(gr, state, cam, curProj);
@@ -205,6 +207,10 @@ public final class FrameGenerator {
         lerp(histProj, curProj, (float) f, dstProj);
 
         renderAndPresent(mc, surface, dstPos);
+    }
+
+    private void skip(String reason) {
+        statsSkips.merge(reason, 1, Integer::sum);
     }
 
     private void currentProjection(GameRenderer gr, GameRenderState state, CameraRenderState cam, Matrix4f out) {
@@ -495,9 +501,12 @@ public final class FrameGenerator {
         if (statsStartNs == 0) statsStartNs = now;
         if (now - statsStartNs >= 5_000_000_000L) {
             double secs = (now - statsStartNs) / 1e9;
-            VFrameGen.LOGGER.info("Real {} fps, generated {} fps, shown {} fps ({}){}",
+            VFrameGen.LOGGER.info("Real {} fps, generated {} fps, shown {} fps ({}){}{}",
                     Math.round(statsReal / secs), Math.round(statsGenerated / secs),
-                    Math.round((statsReal + statsGenerated) / secs), backendName(), broken ? " [disabled after error]" : "");
+                    Math.round((statsReal + statsGenerated) / secs), backendName(),
+                    statsSkips.isEmpty() ? "" : ", skipped " + statsSkips,
+                    broken ? " [disabled after error]" : "");
+            statsSkips.clear();
             statsStartNs = now;
             statsReal = 0;
             statsGenerated = 0;
