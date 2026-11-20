@@ -118,7 +118,7 @@ frames.
 
 - **Turn VSync off.** The present thread does the pacing.
 - Leave **Max Framerate** on Unlimited and let the auto cap pick the real frame rate.
-- Install [Reflex](https://modrinth.com/mod/reflex) to cut input lag. Interpolation still adds about
+- Install [Reflex AntiLag](https://www.curseforge.com/minecraft/mc-mods/reflex-antilag) to cut input lag. Interpolation still adds about
   one real frame, so a lower multiplier (higher real frame rate) also feels more responsive.
 - Hitches from Minecraft itself are amplified visually: with smooth frames on either side, a
   40 ms stall looks like a jump. This happens while exploring new terrain (chunk meshes, Distant
