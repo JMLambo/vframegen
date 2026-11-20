@@ -69,8 +69,8 @@ public final class FrameGenerator {
     private int height = -1;
     private GpuFormat colorFormat;
     private GpuFormat depthFormat;
-    private GpuTexture worldTex, depthTex, handDepthTex, finalTex, outTex;
-    private GpuTextureView worldView, depthView, handDepthView, finalView, outView;
+    private GpuTexture worldTex, noHandTex, depthTex, handDepthTex, finalTex, outTex;
+    private GpuTextureView worldView, noHandView, depthView, handDepthView, finalView, outView;
     private GpuBuffer ubo;
     private final Map<GpuFormat, RenderPipeline> pipelines = new EnumMap<>(GpuFormat.class);
     private boolean broken;
@@ -104,6 +104,11 @@ public final class FrameGenerator {
     private long statsStartNs;
     private int statsReal;
     private int statsGenerated;
+    private long secStartNs;
+    private int secReal;
+    private int secGenerated;
+    private int lastSecReal;
+    private int lastSecGenerated;
     private final java.util.TreeMap<String, Integer> statsSkips = new java.util.TreeMap<>();
 
     // --- scratch --------------------------------------------------------------------------------
@@ -122,6 +127,15 @@ public final class FrameGenerator {
     public String backendName() {
         GpuDevice device = RenderSystem.tryGetDevice();
         return device == null ? "?" : device.getDeviceInfo().backendName();
+    }
+
+    /** Real and generated frames shown in the last full second, for the F3 screen. */
+    public int realFps() {
+        return lastSecReal;
+    }
+
+    public int generatedFps() {
+        return lastSecGenerated;
     }
 
     /** Forget the previous frame, e.g. after a toggle or a world change. */
@@ -288,6 +302,7 @@ public final class FrameGenerator {
             pass.setUniform("DepthSampler", depthView, nearest);
             pass.setUniform("HandDepthSampler", handDepthView, nearest);
             pass.setUniform("FinalSampler", finalView, nearest);
+            pass.setUniform("NoHandSampler", noHandView, linear);
             pass.setUniform("FrameGen", ubo);
             pass.draw(3, 1, 0, 0);
         }
@@ -296,6 +311,10 @@ public final class FrameGenerator {
         encoder.submit();
         surface.present();
         statsGenerated++;
+        secGenerated++;
+        // Count it in vanilla's FPS (F3 and anything that reads Minecraft.getFps()).
+        MinecraftAccessor counter = (MinecraftAccessor) mc;
+        counter.vframegen$setFrames(counter.vframegen$getFrames() + 1);
 
         try {
             surface.acquireNextTexture();
@@ -329,6 +348,7 @@ public final class FrameGenerator {
                         .withUniform("DepthSampler", UniformType.COMBINED_IMAGE_SAMPLER)
                         .withUniform("HandDepthSampler", UniformType.COMBINED_IMAGE_SAMPLER)
                         .withUniform("FinalSampler", UniformType.COMBINED_IMAGE_SAMPLER)
+                        .withUniform("NoHandSampler", UniformType.COMBINED_IMAGE_SAMPLER)
                         .withUniform("FrameGen", UniformType.UNIFORM_BUFFER)
                         .build())
                 .withColorTargetState(new ColorTargetState(Optional.empty(), fmt, ColorTargetState.WRITE_ALL))
@@ -351,14 +371,15 @@ public final class FrameGenerator {
         if (!prepare(gr)) return;
         RenderTarget main = gr.mainRenderTarget();
         copy(main.getDepthTexture(), depthTex);
+        copy(main.getColorTexture(), noHandTex);
         frameWorldDepthCaptured = true;
     }
 
     /** Right after the held item is drawn, into a depth buffer that was cleared for it. */
-    public void captureHandDepth(GameRenderer gr) {
+    public void captureHandDepth(GameRenderer gr, boolean usedHudTarget) {
         if (!frameWorldDepthCaptured) return;
         RenderTarget hud = ((GameRendererAccessor) gr).vframegen$hud3DTarget();
-        RenderTarget target = hud != null ? hud : gr.mainRenderTarget();
+        RenderTarget target = usedHudTarget && hud != null ? hud : gr.mainRenderTarget();
         GpuTexture handDepth = target.getDepthTexture();
         if (handDepth == null || handDepth.getFormat() != depthFormat
                 || handDepth.getWidth(0) != width || handDepth.getHeight(0) != height) {
@@ -439,6 +460,7 @@ public final class FrameGenerator {
         int sampled = GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING;
         worldTex = device.createTexture("VFrameGen world", sampled, color, w, h, 1, 1);
         finalTex = device.createTexture("VFrameGen final", sampled, color, w, h, 1, 1);
+        noHandTex = device.createTexture("VFrameGen world without hand", sampled, color, w, h, 1, 1);
         depthTex = device.createTexture("VFrameGen depth", sampled, depth, w, h, 1, 1);
         handDepthTex = device.createTexture("VFrameGen hand depth", sampled, depth, w, h, 1, 1);
         outTex = device.createTexture("VFrameGen output",
@@ -446,6 +468,7 @@ public final class FrameGenerator {
                 color, w, h, 1, 1);
         worldView = device.createTextureView(worldTex);
         finalView = device.createTextureView(finalTex);
+        noHandView = device.createTextureView(noHandTex);
         depthView = device.createTextureView(depthTex);
         handDepthView = device.createTextureView(handDepthTex);
         outView = device.createTextureView(outTex);
@@ -461,14 +484,14 @@ public final class FrameGenerator {
     }
 
     private void releaseTextures() {
-        for (GpuTextureView v : new GpuTextureView[]{worldView, finalView, depthView, handDepthView, outView}) {
+        for (GpuTextureView v : new GpuTextureView[]{worldView, noHandView, finalView, depthView, handDepthView, outView}) {
             if (v != null) v.close();
         }
-        for (GpuTexture t : new GpuTexture[]{worldTex, finalTex, depthTex, handDepthTex, outTex}) {
+        for (GpuTexture t : new GpuTexture[]{worldTex, noHandTex, finalTex, depthTex, handDepthTex, outTex}) {
             if (t != null) t.close();
         }
-        worldView = finalView = depthView = handDepthView = outView = null;
-        worldTex = finalTex = depthTex = handDepthTex = outTex = null;
+        worldView = noHandView = finalView = depthView = handDepthView = outView = null;
+        worldTex = noHandTex = finalTex = depthTex = handDepthTex = outTex = null;
     }
 
     // =============================================================================================
@@ -498,6 +521,15 @@ public final class FrameGenerator {
         lastRealPresentNs = now;
 
         statsReal++;
+        secReal++;
+        if (secStartNs == 0) secStartNs = now;
+        if (now - secStartNs >= 1_000_000_000L) {
+            lastSecReal = secReal;
+            lastSecGenerated = secGenerated;
+            secReal = 0;
+            secGenerated = 0;
+            secStartNs = now;
+        }
         if (statsStartNs == 0) statsStartNs = now;
         if (now - statsStartNs >= 5_000_000_000L) {
             double secs = (now - statsStartNs) / 1e9;

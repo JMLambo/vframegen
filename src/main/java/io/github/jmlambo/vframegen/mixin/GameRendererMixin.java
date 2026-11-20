@@ -2,6 +2,9 @@ package io.github.jmlambo.vframegen.mixin;
 
 import io.github.jmlambo.vframegen.FrameGenerator;
 import net.minecraft.client.renderer.GameRenderer;
+import net.minecraft.client.renderer.state.OptionsRenderState;
+import net.minecraft.client.renderer.state.level.CameraRenderState;
+import net.minecraft.client.renderer.state.level.PlayerRenderState;
 import org.joml.Matrix4f;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -24,10 +27,13 @@ public abstract class GameRendererMixin {
         FrameGenerator.INSTANCE.captureWorldDepth((GameRenderer) (Object) this);
     }
 
-    @Inject(method = "render3dHud", require = 0, at = @At(value = "INVOKE", shift = At.Shift.AFTER,
-            target = "Lnet/minecraft/client/renderer/GameRenderer;renderItemInHand(Lnet/minecraft/client/renderer/state/level/CameraRenderState;Lnet/minecraft/client/renderer/state/level/PlayerRenderState;Lcom/mojang/renderpearl/api/textures/GpuTextureView;)V"))
-    private void vframegen$afterHand(CallbackInfo ci) {
-        FrameGenerator.INSTANCE.captureHandDepth((GameRenderer) (Object) this);
+    // renderItemInHand only submits the hand; it is drawn by the feature dispatcher later in
+    // render3dHud, so the hand's depth is only there at the end of the method. The last parameter
+    // picks where it went: the separate HUD target (true) or the main depth buffer (false).
+    @Inject(method = "render3dHud", at = @At("RETURN"), require = 0)
+    private void vframegen$afterHand(CameraRenderState camera, PlayerRenderState player, OptionsRenderState options,
+                                     boolean useHudTarget, CallbackInfo ci) {
+        FrameGenerator.INSTANCE.captureHandDepth((GameRenderer) (Object) this, useHudTarget);
     }
 
     @Inject(method = "render", at = @At(value = "INVOKE", shift = At.Shift.AFTER,

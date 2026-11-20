@@ -15,6 +15,7 @@ uniform sampler2D WorldSampler;   // last real frame, world only (before GUI)
 uniform sampler2D DepthSampler;   // its depth, captured before the held item was drawn
 uniform sampler2D HandDepthSampler; // depth of the held item pass (cleared to the far value first)
 uniform sampler2D FinalSampler;   // last real frame, world + GUI
+uniform sampler2D NoHandSampler;  // last real frame before the held item was drawn
 
 layout(std140) uniform FrameGen {
     mat4 SrcInvViewProj;     // src NDC -> position relative to the src camera
@@ -53,13 +54,19 @@ vec2 landingSpot(vec2 uvSrc, float depth) {
     return (clip.xy / clip.w) * 0.5 + 0.5;
 }
 
+// The world to reproject from: without the held item when we have that, so the hand is never
+// smeared into the world around it.
+vec3 scene(vec2 uv) {
+    return Params.x > 0.5 ? texture(NoHandSampler, uv).rgb : texture(WorldSampler, uv).rgb;
+}
+
 vec3 sharpen(vec2 uv, vec3 center) {
     if (Params2.y <= 0.0) return center;
     vec2 px = Params2.zw;
-    vec3 blur = texture(WorldSampler, uv + vec2(px.x, 0.0)).rgb
-              + texture(WorldSampler, uv - vec2(px.x, 0.0)).rgb
-              + texture(WorldSampler, uv + vec2(0.0, px.y)).rgb
-              + texture(WorldSampler, uv - vec2(0.0, px.y)).rgb;
+    vec3 blur = scene(uv + vec2(px.x, 0.0))
+              + scene(uv - vec2(px.x, 0.0))
+              + scene(uv + vec2(0.0, px.y))
+              + scene(uv - vec2(0.0, px.y));
     return clamp(center + (center - blur * 0.25) * Params2.y, 0.0, 1.0);
 }
 
@@ -135,7 +142,7 @@ void main() {
         vec2 size = 1.0 / Params2.zw;
         uv = (floor(uv * size) + 0.5) / size;
     }
-    vec3 color = sharpen(uv, texture(WorldSampler, uv).rgb);
+    vec3 color = sharpen(uv, scene(uv));
     if (Params.w > 0.5) {
         color = mix(color, vec3(1.0, 0.0, 1.0), 0.15);
     }

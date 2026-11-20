@@ -8,4 +8,11 @@ import org.spongepowered.asm.mixin.gen.Accessor;
 public interface MinecraftAccessor {
     @Accessor("surfaceIsInvalid")
     void vframegen$setSurfaceIsInvalid(boolean invalid);
+
+    /** Vanilla's per-second frame counter, which becomes the F3 FPS. */
+    @Accessor("frames")
+    int vframegen$getFrames();
+
+    @Accessor("frames")
+    void vframegen$setFrames(int frames);
 }
