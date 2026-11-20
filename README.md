@@ -98,3 +98,20 @@ frames.
 
 JDK 25, then `./gradlew build`. The jar is in `build/libs/`. `./gradlew runClient` starts a dev
 client with Sodium, Iris and Distant Horizons from `run/mods`, and uses ZGC.
+
+Every push to `main` and every pull request is built on GitHub Actions. The jar is attached to
+each run.
+
+## Releasing
+
+1. Set `mod_version` in `gradle.properties` (for example `0.2.0`) and commit it.
+2. Tag that commit with the same version and push the tag:
+
+   ```bash
+   git tag v0.2.0
+   git push origin v0.2.0
+   ```
+
+The **Release** workflow checks that the tag matches `mod_version`, builds the mod, and publishes a
+GitHub Release with the jar and notes generated from the commits since the last release. A tag
+with a suffix (`v0.2.0-beta.1`) is marked as a pre-release.
