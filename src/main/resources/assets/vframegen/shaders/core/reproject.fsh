@@ -67,21 +67,27 @@ float nearness(float d) {
 
 // The view ray through an output pixel, mapped into a source frame. Two points on the ray, not
 // one: view bobbing puts a small translation into the projection matrix.
-vec2 projectDirection(vec2 uvDst, mat4 srcViewProjRot) {
+// z is 0 when the direction is behind the source camera: not in that frame at all.
+vec3 projectDirection(vec2 uvDst, mat4 srcViewProjRot) {
     vec2 ndc = uvDst * 2.0 - 1.0;
     vec4 a = DstInvViewProjRot * vec4(ndc, 1.0, 1.0);
     vec4 b = DstInvViewProjRot * vec4(ndc, 0.5, 1.0);
     vec3 dir = b.xyz / b.w - a.xyz / a.w;
     if (Params2.x < 0.5) dir = -dir; // without reversed Z, NDC z = 1 is the far end
     vec4 clip = srcViewProjRot * vec4(dir, 0.0);
-    return (clip.xy / clip.w) * 0.5 + 0.5;
+    if (clip.w <= 1.0e-6) return vec3(-1.0, -1.0, 0.0);
+    return vec3((clip.xy / clip.w) * 0.5 + 0.5, 1.0);
 }
 
-vec2 landingSpot(vec2 uvSrc, float depth, mat4 invViewProj, mat4 dstViewProj) {
+// Where a source pixel lands in the output. z is 0 when it lands behind the output camera (or the
+// depth unprojects to nothing): never a match.
+vec3 landingSpot(vec2 uvSrc, float depth, mat4 invViewProj, mat4 dstViewProj) {
     float ndcZ = Params2.y > 0.5 ? depth : depth * 2.0 - 1.0;
     vec4 p = invViewProj * vec4(uvSrc * 2.0 - 1.0, ndcZ, 1.0);
+    if (abs(p.w) < 1.0e-12) return vec3(-1.0, -1.0, 0.0);
     vec4 clip = dstViewProj * vec4(p.xyz / p.w, 1.0);
-    return (clip.xy / clip.w) * 0.5 + 0.5;
+    if (clip.w <= 1.0e-6) return vec3(-1.0, -1.0, 0.0);
+    return vec3((clip.xy / clip.w) * 0.5 + 0.5, 1.0);
 }
 
 // Held item, from the mask built once per real frame (lockmask.fsh).
@@ -121,8 +127,12 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
         return w;
     }
 
-    vec2 skyUv = projectDirection(uvDst, viewProjRot);
-    vec2 uvSrc = skyUv;
+    vec3 skyDir = projectDirection(uvDst, viewProjRot);
+    vec2 skyUv = skyDir.xy;
+    // Behind the source camera there is no rotation answer: no seed from it, no sky sample, and a
+    // pixel with no match falls back to the unwarped one. (Merely off screen is still searched.)
+    bool skyBehind = skyDir.z < 0.5;
+    vec2 uvSrc = skyBehind ? uvDst : skyUv;
     bool contested = false;
     w.reason = R_ROTATION;
     if (flags.w > 0.5) {
@@ -133,22 +143,28 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
         vec2 bestHit = skyUv;
         float bestHitNear = 0.0;
         bool haveHit = false;
-        vec2 bestMiss = skyUv;
+        float minHitNear = 2.0, maxHitNear = -2.0;
+        vec2 bestMiss = skyBehind ? uvDst : skyUv;
         float bestMissNear = 0.0;
         bool haveMiss = false;
-        for (int chain = 0; chain < 2; chain++) {
+        for (int chain = skyBehind ? 1 : 0; chain < 2; chain++) {
             vec2 uv = chain == 0 ? skyUv : uvDst;
             for (int i = 0; i < 6; i++) {
                 vec2 uvc = clamp(uv, 0.0, 1.0);
                 float d = texture(depthTex, uvc).r;
                 bool sky = isSky(d);
-                vec2 landed = sky ? uvDst + (uvc - skyUv) : landingSpot(uvc, d, invViewProj, dstViewProj);
+                vec3 spot = sky ? vec3(uvDst + (uvc - skyUv), 1.0) : landingSpot(uvc, d, invViewProj, dstViewProj);
+                if (spot.z < 0.5) break; // behind the output camera: this chain can't go on
+                vec2 landed = spot.xy;
                 float errPx = length((landed - uvDst) * screen);
                 float near = sky ? -1.0 : nearness(d);
                 vec2 cand = sky ? skyUv : uvc;
+                if (sky && skyBehind) break; // not a usable sample
                 if (errPx < 1.0) {
+                    // Matches at different depths: an edge, whatever order they were found in.
+                    minHitNear = min(minHitNear, near);
+                    maxHitNear = max(maxHitNear, near);
                     if (!haveHit || near > bestHitNear) {
-                        if (haveHit && abs(near - bestHitNear) > 1.0e-4) contested = true;
                         bestHit = cand;
                         bestHitNear = near;
                         haveHit = true;
@@ -164,11 +180,11 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
         }
         uvSrc = haveHit ? bestHit : bestMiss;
         w.near = haveHit ? bestHitNear : bestMissNear;
-        contested = contested || !haveHit;
+        contested = !haveHit || maxHitNear - minHitNear > 1.0e-4;
         w.hit = haveHit;
         w.reason = haveHit ? R_HIT : R_FILL;
     }
-    if (offscreen(skyUv) && offscreen(uvSrc)) {
+    if ((offscreen(skyUv) && offscreen(uvSrc)) || (skyBehind && w.reason == R_ROTATION)) {
         w.hit = false;
         w.reason = R_OFFSCREEN;
     }
@@ -183,6 +199,9 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
         for (int i = 0; i < 24 && nearLocked(mask, uv, flags); i++) {
             uv = clamp(uv + stepUv, vec2(0.0), vec2(1.0));
         }
+        // Still on the item (screen edge, or a wide item): the world here, unwarped, rather than a
+        // copy of the item.
+        if (nearLocked(mask, uv, flags)) uv = uvDst;
     }
     if (contested) {
         // At a depth edge, bilinear filtering would blend foreground into background.
