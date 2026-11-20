@@ -140,10 +140,13 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
         float bestHitNear = 0.0;
         bool haveHit = false;
         float minHitNear = 2.0, maxHitNear = -2.0;
-        vec2 bestMiss = skyUv;
+        // Sky behind the source camera (projectDirection's off-frame sentinel): there is no sky
+        // sample to use, so the fill falls back to the unwarped pixel.
+        bool skyOff = offscreen(skyUv);
+        vec2 bestMiss = skyOff ? uvDst : skyUv;
         float bestMissNear = 0.0;
         bool haveMiss = false;
-        for (int chain = 0; chain < 2; chain++) {
+        for (int chain = skyOff ? 1 : 0; chain < 2; chain++) {
             vec2 uv = chain == 0 ? skyUv : uvDst;
             for (int i = 0; i < 6; i++) {
                 vec2 uvc = clamp(uv, 0.0, 1.0);
@@ -155,6 +158,7 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
                 float errPx = length((landed - uvDst) * screen);
                 float near = sky ? -1.0 : nearness(d);
                 vec2 cand = sky ? skyUv : uvc;
+                if (sky && skyOff) break; // not a usable sample
                 if (errPx < 1.0) {
                     // Matches at different depths: an edge, whatever order they were found in.
                     minHitNear = min(minHitNear, near);
