@@ -14,7 +14,10 @@ public final class FrameGenConfig {
     public enum DepthMode { AUTO, DEPTH, ROTATION_ONLY }
     public enum Pacing { OFF, BALANCED }
 
+    public static final int MAX_MULTIPLIER = 6;
+
     public boolean enabled = true;
+    public int multiplier = 2;
     public boolean disableWhileScreenOpen = true;
     public DepthMode depthMode = DepthMode.AUTO;
     public Pacing pacing = Pacing.BALANCED;
@@ -28,7 +31,9 @@ public final class FrameGenConfig {
     private static final String HEADER = """
             VFrameGen settings. Toggle in game with the key bound under Controls -> VFrameGen (F9 by default).
 
-            enabled                 generate an extra frame between every pair of real frames.
+            enabled                 generate frames between real frames.
+            multiplier              2 to 6: frames shown per real frame (2 = one generated frame per
+                                    real one). Costs GPU time per extra frame, no extra VRAM.
             disableWhileScreenOpen  only generate while no menu or inventory is open.
             depthMode               AUTO, DEPTH or ROTATION_ONLY. DEPTH reprojects with the depth buffer
                                     (correct parallax when moving). ROTATION_ONLY ignores depth: exact for
@@ -56,6 +61,7 @@ public final class FrameGenConfig {
             try (Reader r = Files.newBufferedReader(p)) {
                 props.load(r);
                 c.enabled = bool(props, "enabled", c.enabled);
+                c.multiplier = Math.clamp((int) dbl(props, "multiplier", c.multiplier), 2, MAX_MULTIPLIER);
                 c.disableWhileScreenOpen = bool(props, "disableWhileScreenOpen", c.disableWhileScreenOpen);
                 c.depthMode = enumOf(props, "depthMode", c.depthMode, DepthMode.class);
                 c.pacing = enumOf(props, "pacing", c.pacing, Pacing.class);
@@ -76,6 +82,7 @@ public final class FrameGenConfig {
     public void save() {
         java.util.TreeMap<String, String> values = new java.util.TreeMap<>();
         values.put("enabled", Boolean.toString(enabled));
+        values.put("multiplier", Integer.toString(multiplier));
         values.put("disableWhileScreenOpen", Boolean.toString(disableWhileScreenOpen));
         values.put("depthMode", depthMode.name());
         values.put("pacing", pacing.name());

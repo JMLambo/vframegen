@@ -3,14 +3,14 @@
   "key.vframegen.toggle": "Toggle frame generation",
   "vframegen.toggle.on": "Frame generation ON (%s)",
   "vframegen.toggle.off": "Frame generation OFF",
-
   "vframegen.config.title": "VFrameGen",
   "vframegen.config.general": "General",
   "vframegen.config.limits": "Limits",
   "vframegen.config.quality": "Quality",
-
   "vframegen.config.enabled": "Frame generation",
-  "vframegen.config.enabled.tooltip": "Show a generated frame between every pair of real frames.",
+  "vframegen.config.enabled.tooltip": "Show generated frames between real frames.",
+  "vframegen.config.multiplier": "Frame generation",
+  "vframegen.config.multiplier.tooltip": "Frames shown per real frame. 2x shows one generated frame per real one, 6x shows five.\nEach extra frame costs a little GPU time but no extra VRAM.\nWith VSync on, real frames are capped at your refresh rate divided by this.",
   "vframegen.config.depthMode": "Reprojection",
   "vframegen.config.depthMode.tooltip": "Depth: correct parallax when moving.\nRotation only: ignores depth; exact when turning, approximate when moving.\nAuto: rotation only while an Iris shader pack is active.",
   "vframegen.config.depthMode.auto": "Auto",

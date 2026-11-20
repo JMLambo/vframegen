@@ -207,20 +207,28 @@ public final class FrameGenerator {
         // The projection the coming real frame will use (view bobbing included).
         currentProjection(gr, state, cam, curProj);
 
-        pace(cfg);
+        // N-x: N-1 generated frames per real one, each meant for its own slot k/N of the interval.
+        int extra = Math.clamp(cfg.multiplier, 2, FrameGenConfig.MAX_MULTIPLIER) - 1;
+        long waitBudget = (long) (lastLoopBlockedNs * 0.9);
+        Quaternionf qHist = new Quaternionf(q0);
+        Quaternionf qCur = new Quaternionf(q1);
+        Vector3d curPos = new Vector3d(cam.pos.x, cam.pos.y, cam.pos.z);
+        for (int k = 1; k <= extra; k++) {
+            waitBudget -= pace(cfg, k / (double) (extra + 1), waitBudget);
 
-        // Pose: real frames show a camera that is emaLatency old by the time they are on screen.
-        // Show the generated frame with the same delay, which puts it between the two real poses.
-        long now = System.nanoTime();
-        double f = (now - emaLatencyNs - histExtractNs) / (double) loopNs;
-        f = Math.clamp(f, 0.0, 1.0);
+            // Pose: real frames show a camera that is emaLatency old by the time they are on
+            // screen. Show each generated frame with the same delay, which puts it between the
+            // two real poses.
+            long now = System.nanoTime();
+            double f = Math.clamp((now - emaLatencyNs - histExtractNs) / (double) loopNs, 0.0, 1.0);
 
-        Vector3d dstPos = new Vector3d(histPos).lerp(new Vector3d(cam.pos.x, cam.pos.y, cam.pos.z), f);
-        q0.slerp(q1, (float) f, q1);
-        dstViewRot.rotation(q1);
-        lerp(histProj, curProj, (float) f, dstProj);
+            Vector3d dstPos = new Vector3d(histPos).lerp(curPos, f);
+            qHist.slerp(qCur, (float) f, q1);
+            dstViewRot.rotation(q1);
+            lerp(histProj, curProj, (float) f, dstProj);
 
-        renderAndPresent(mc, surface, dstPos);
+            if (!renderAndPresent(mc, surface, dstPos)) break;
+        }
     }
 
     private void skip(String reason) {
@@ -238,17 +246,19 @@ public final class FrameGenerator {
         out.mul(pose.last().pose());
     }
 
-    /** BALANCED pacing: wait until the middle of the real-frame interval, if waiting is free. */
-    private void pace(FrameGenConfig cfg) {
-        if (cfg.pacing != FrameGenConfig.Pacing.BALANCED || lastRealPresentNs == 0 || emaLoopNs <= 0) return;
-        long target = lastRealPresentNs + (long) (emaLoopNs * 0.5);
-        long wait = target - System.nanoTime();
-        // Only wait as long as the last loop spent blocked on the GPU/swapchain anyway.
-        long budget = (long) (lastLoopBlockedNs * 0.9);
-        wait = Math.min(wait, budget);
-        wait = Math.min(wait, (long) (emaLoopNs * 0.5));
-        if (wait <= 0) return;
-        long end = System.nanoTime() + wait;
+    /**
+     * BALANCED pacing: wait until {@code slot} (0..1) of the way through the real-frame interval,
+     * but only as long as the render thread would have been blocked on the GPU anyway.
+     *
+     * @return how long it waited, in ns
+     */
+    private long pace(FrameGenConfig cfg, double slot, long budget) {
+        if (cfg.pacing != FrameGenConfig.Pacing.BALANCED || lastRealPresentNs == 0 || emaLoopNs <= 0) return 0;
+        long start = System.nanoTime();
+        long target = lastRealPresentNs + (long) (emaLoopNs * slot);
+        long wait = Math.min(target - start, budget);
+        if (wait <= 0) return 0;
+        long end = start + wait;
         while (true) {
             long left = end - System.nanoTime();
             if (left <= 0) break;
@@ -258,9 +268,11 @@ public final class FrameGenerator {
                 Thread.onSpinWait();
             }
         }
+        return System.nanoTime() - start;
     }
 
-    private void renderAndPresent(Minecraft mc, GpuSurface surface, Vector3d dstPos) {
+    /** @return false when no swapchain image could be acquired afterwards */
+    private boolean renderAndPresent(Minecraft mc, GpuSurface surface, Vector3d dstPos) {
         FrameGenConfig cfg = VFrameGen.config();
         GpuDevice device = RenderSystem.getDevice();
         CommandEncoder encoder = device.createCommandEncoder();
@@ -318,10 +330,12 @@ public final class FrameGenerator {
 
         try {
             surface.acquireNextTexture();
+            return true;
         } catch (SurfaceException e) {
             // Same as vanilla: the frame is skipped and the surface reconfigured next loop.
             ((MinecraftAccessor) mc).vframegen$setSurfaceIsInvalid(true);
             invalidate();
+            return false;
         }
     }
 

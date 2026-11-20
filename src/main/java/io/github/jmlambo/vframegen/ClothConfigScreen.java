@@ -28,6 +28,10 @@ final class ClothConfigScreen {
         general.addEntry(e.startBooleanToggle(t("enabled"), cfg.enabled)
                 .setDefaultValue(def.enabled).setTooltip(tip("enabled"))
                 .setSaveConsumer(v -> cfg.enabled = v).build());
+        general.addEntry(e.startIntSlider(t("multiplier"), cfg.multiplier, 2, FrameGenConfig.MAX_MULTIPLIER)
+                .setDefaultValue(def.multiplier).setTooltip(tip("multiplier"))
+                .setTextGetter(v -> Component.literal(v + "x"))
+                .setSaveConsumer(v -> cfg.multiplier = v).build());
         general.addEntry(e.startEnumSelector(t("depthMode"), FrameGenConfig.DepthMode.class, cfg.depthMode)
                 .setDefaultValue(def.depthMode).setTooltip(tip("depthMode"))
                 .setEnumNameProvider(v -> Component.translatable("vframegen.config.depthMode." + v.name().toLowerCase()))
