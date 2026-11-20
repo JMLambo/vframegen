@@ -32,6 +32,10 @@ final class ClothConfigScreen {
                 .setDefaultValue(def.multiplier).setTooltip(tip("multiplier"))
                 .setTextGetter(v -> Component.literal(v + "x"))
                 .setSaveConsumer(v -> cfg.multiplier = v).build());
+        general.addEntry(e.startEnumSelector(t("mode"), FrameGenConfig.Mode.class, cfg.mode)
+                .setDefaultValue(def.mode).setTooltip(tip("mode"))
+                .setEnumNameProvider(v -> Component.translatable("vframegen.config.mode." + v.name().toLowerCase()))
+                .setSaveConsumer(v -> cfg.mode = v).build());
         general.addEntry(e.startEnumSelector(t("depthMode"), FrameGenConfig.DepthMode.class, cfg.depthMode)
                 .setDefaultValue(def.depthMode).setTooltip(tip("depthMode"))
                 .setEnumNameProvider(v -> Component.translatable("vframegen.config.depthMode." + v.name().toLowerCase()))

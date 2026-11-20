@@ -1,6 +1,7 @@
 package io.github.jmlambo.vframegen.mixin;
 
 import io.github.jmlambo.vframegen.FrameGenerator;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.state.OptionsRenderState;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
@@ -34,6 +35,20 @@ public abstract class GameRendererMixin {
     private void vframegen$afterHand(CameraRenderState camera, PlayerRenderState player, OptionsRenderState options,
                                      boolean useHudTarget, CallbackInfo ci) {
         FrameGenerator.INSTANCE.captureHandDepth((GameRenderer) (Object) this, useHudTarget);
+    }
+
+    /** Checkpoint: the world is drawn (the bulk of a frame's work, with shaders). */
+    @Inject(method = "renderLevel", require = 0, at = @At(value = "INVOKE", shift = At.Shift.AFTER,
+            target = "Lnet/minecraft/client/renderer/LevelRenderer;render(Lcom/mojang/blaze3d/resource/GraphicsResourceAllocator;ZLnet/minecraft/client/renderer/state/level/CameraRenderState;Lcom/mojang/renderpearl/api/buffers/GpuBufferSlice;Lorg/joml/Vector4f;ZZ)V"))
+    private void vframegen$afterLevel(CallbackInfo ci) {
+        FrameGenerator.INSTANCE.checkpoint(FrameGenerator.Checkpoint.AFTER_LEVEL);
+    }
+
+    /** Checkpoint: about to draw the GUI. */
+    @Inject(method = "render", require = 0, at = @At(value = "INVOKE",
+            target = "Lnet/minecraft/client/gui/render/GuiRenderer;render()V"))
+    private void vframegen$beforeGui(CallbackInfo ci) {
+        FrameGenerator.INSTANCE.checkpoint(FrameGenerator.Checkpoint.BEFORE_GUI);
     }
 
     @Inject(method = "render", at = @At(value = "INVOKE", shift = At.Shift.AFTER,

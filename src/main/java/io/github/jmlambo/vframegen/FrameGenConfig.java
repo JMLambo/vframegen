@@ -11,6 +11,7 @@ import java.util.Properties;
 
 /** Settings, stored in config/vframegen.properties. */
 public final class FrameGenConfig {
+    public enum Mode { INTERPOLATED, LOW_LATENCY }
     public enum DepthMode { AUTO, DEPTH, ROTATION_ONLY }
     public enum Pacing { OFF, BALANCED }
 
@@ -18,6 +19,7 @@ public final class FrameGenConfig {
 
     public boolean enabled = true;
     public int multiplier = 2;
+    public Mode mode = Mode.INTERPOLATED;
     public boolean disableWhileScreenOpen = true;
     public DepthMode depthMode = DepthMode.AUTO;
     public Pacing pacing = Pacing.BALANCED;
@@ -35,6 +37,10 @@ public final class FrameGenConfig {
             multiplier              2 to 6: frames shown per real frame (2 = one generated frame per
                                     real one). Costs GPU time per extra frame, no extra VRAM.
             disableWhileScreenOpen  only generate while no menu or inventory is open.
+            mode                    INTERPOLATED or LOW_LATENCY. INTERPOLATED holds each real frame back by
+                                    one frame and builds the in-between frames from both neighbours: no
+                                    smearing at the screen edges, even pacing, about one real frame more
+                                    input lag. LOW_LATENCY builds them from the last real frame only.
             depthMode               AUTO, DEPTH or ROTATION_ONLY. DEPTH reprojects with the depth buffer
                                     (correct parallax when moving). ROTATION_ONLY ignores depth: exact for
                                     turning, approximate for moving. AUTO uses ROTATION_ONLY while an Iris
@@ -63,6 +69,7 @@ public final class FrameGenConfig {
                 c.enabled = bool(props, "enabled", c.enabled);
                 c.multiplier = Math.clamp((int) dbl(props, "multiplier", c.multiplier), 2, MAX_MULTIPLIER);
                 c.disableWhileScreenOpen = bool(props, "disableWhileScreenOpen", c.disableWhileScreenOpen);
+                c.mode = enumOf(props, "mode", c.mode, Mode.class);
                 c.depthMode = enumOf(props, "depthMode", c.depthMode, DepthMode.class);
                 c.pacing = enumOf(props, "pacing", c.pacing, Pacing.class);
                 c.maxCameraJumpBlocks = dbl(props, "maxCameraJumpBlocks", c.maxCameraJumpBlocks);
@@ -84,6 +91,7 @@ public final class FrameGenConfig {
         values.put("enabled", Boolean.toString(enabled));
         values.put("multiplier", Integer.toString(multiplier));
         values.put("disableWhileScreenOpen", Boolean.toString(disableWhileScreenOpen));
+        values.put("mode", mode.name());
         values.put("depthMode", depthMode.name());
         values.put("pacing", pacing.name());
         values.put("maxCameraJumpBlocks", Double.toString(maxCameraJumpBlocks));
