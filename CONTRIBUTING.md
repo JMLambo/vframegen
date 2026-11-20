@@ -30,6 +30,13 @@ Use the **Bug report** issue form. Before you file:
 - `./gradlew build` must pass; GitHub Actions builds every pull request.
 - Code that runs every frame should not allocate or log unless a Debug option is on.
 
+## Branch rules
+
+`main` only changes through pull requests, for everyone including the maintainer: the build must
+pass, and `main` cannot be force-pushed or deleted. The rule lives in `.github/rulesets/main.json`;
+`scripts/apply-branch-ruleset.sh` applies it (or updates it) on GitHub. No approving review is
+required, so a solo maintainer can still merge their own pull requests.
+
 ## Where things are
 
 | Area | Files |
