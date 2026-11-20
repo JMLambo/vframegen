@@ -3,11 +3,17 @@
   "id": "vframegen",
   "version": "${version}",
   "name": "VFrameGen",
-  "description": "Frame generation for Minecraft's Vulkan (and OpenGL) renderer. Reprojects the last real frame with its depth buffer to show an extra frame between real ones.",
+  "description": "Frame generation for Minecraft's Vulkan (and OpenGL) renderer: shows generated frames between real ones, built by depth-aware interpolation. Works with Sodium, Iris shader packs and Distant Horizons. Includes render scale upscaling.",
   "authors": [
     "JMLambo"
   ],
+  "contact": {
+    "homepage": "https://github.com/JMLambo/vframegen",
+    "sources": "https://github.com/JMLambo/vframegen",
+    "issues": "https://github.com/JMLambo/vframegen/issues"
+  },
   "license": "MIT",
+  "icon": "assets/vframegen/icon.png",
   "environment": "client",
   "entrypoints": {
     "client": [

@@ -1,0 +1,9 @@
+# Sections for the release notes GitHub generates from merged pull requests.
+changelog:
+  categories:
+    - title: New
+      labels: [enhancement]
+    - title: Fixes
+      labels: [bug]
+    - title: Other changes
+      labels: ["*"]

@@ -1,4 +1,10 @@
+<img src="src/main/resources/assets/vframegen/icon.png" alt="" width="96" align="right">
+
 # VFrameGen
+
+[![Build](https://github.com/JMLambo/vframegen/actions/workflows/build.yml/badge.svg)](https://github.com/JMLambo/vframegen/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/JMLambo/vframegen?include_prereleases&label=release)](https://github.com/JMLambo/vframegen/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Frame generation for Minecraft **26.3** (Fabric) that works on the **Vulkan** renderer, as well as
 OpenGL, including with **Iris shader packs**, **Sodium** and **Distant Horizons**. It also has
@@ -8,6 +14,36 @@ Other frame-generation mods call OpenGL directly. VFrameGen draws through Mojang
 abstraction (`com.mojang.renderpearl`): textures, render pipelines with GLSL shaders the game
 compiles itself, and the window surface. On Vulkan it adds a few low-level hooks for exact frame
 pacing.
+
+> **Status: alpha.** It works well on the setup it was developed on (see
+> [Tested with](#tested-with)). Expect rough edges on other hardware and mod combinations, and
+> please [report them](https://github.com/JMLambo/vframegen/issues/new/choose).
+
+## Installing
+
+1. Install [Fabric Loader](https://fabricmc.net/use/) for Minecraft 26.3 and
+   [Fabric API](https://modrinth.com/mod/fabric-api).
+2. Download the jar from [Releases](https://github.com/JMLambo/vframegen/releases) and put it in
+   your `mods` folder.
+3. Optional: [Mod Menu](https://modrinth.com/mod/modmenu) and
+   [Cloth Config](https://modrinth.com/mod/cloth-config) for the settings screen, and
+   [Controlify](https://modrinth.com/mod/controlify) for controller bindings.
+4. In game, select **Video Settings → Graphics Backend → Vulkan** for the best pacing, turn
+   **VSync off**, and press **F9** to toggle frame generation.
+
+Requires Java 25, which Minecraft 26.3 already uses.
+
+## Tested with
+
+| | |
+|---|---|
+| Minecraft | 26.3, Fabric Loader 0.19.5+ |
+| Backend | Vulkan (present thread). OpenGL builds and runs, but has been tested much less. |
+| GPU / OS | NVIDIA RTX 4050 Laptop, Linux (Fedora, KDE Wayland) |
+| Mods | Sodium 0.9.3-beta.4, Iris 1.12 (a local build with Distant Horizons 3.4 support), Distant Horizons 3.4.0-RC2, Controlify 3.5.3 |
+| Shader pack | Complementary Unbound r5.10 + Euphoria Patches 1.11.2 |
+
+Reports from other GPUs (AMD, Intel), Windows, and other shader packs are very welcome.
 
 ## How it works
 
@@ -86,13 +122,17 @@ frames.
   Horizons LODs, shadow geometry). Pre-generating the world, lowering shadow distance or Distant
   Horizons' CPU load, and a low-pause collector (`-XX:+UseZGC`) all help.
 
-## Limits
+## Known issues
 
 - Interpolation adds about one real frame of latency.
+- Hitches from Minecraft itself (chunk loading, shader-pack shadow rebuilds, Distant Horizons LOD
+  building) look worse with frame generation on: smooth motion, a pause, then a jump. They also
+  happen with it off. See [Tips](#tips).
 - Disocclusions (what was hidden behind something) are filled from neighbouring pixels, so fast
   sideways motion can smear edges a little. Things that move on their own (waving leaves, water,
   mobs) are only as smooth as the real frames.
 - Transparent HUD parts show the world behind them as of the nearer real frame.
+- OpenGL, AMD/Intel GPUs, Windows, and Reflex with the present thread have barely been tested.
 
 ## Building
 
@@ -115,3 +155,12 @@ each run.
 The **Release** workflow checks that the tag matches `mod_version`, builds the mod, and publishes a
 GitHub Release with the jar and notes generated from the commits since the last release. A tag
 with a suffix (`v0.2.0-beta.1`) is marked as a pre-release.
+
+## Contributing
+
+Bug reports and testing on other setups are the most helpful. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+
+## License
+
+[MIT](LICENSE)

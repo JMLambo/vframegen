@@ -1,0 +1,72 @@
+name: Bug report
+description: Something is broken, crashes, or looks wrong with frame generation on.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please check first whether it also happens with frame generation off (F9).
+        If it does, it is most likely not VFrameGen.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens
+      description: What you see, and what you expected instead. Screenshots or a short video help a lot.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to reproduce
+      placeholder: |
+        1. Load a world with shaders on
+        2. Turn frame generation on (F9)
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: f9
+    attributes:
+      label: Does it also happen with frame generation off (F9)?
+      options: ["No, only with it on", "Yes, also with it off", "Not sure"]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: VFrameGen version
+      placeholder: 0.1.0-alpha.1
+    validations:
+      required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Graphics backend
+      description: Video Settings → Graphics Backend
+      options: [Vulkan, OpenGL]
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU, driver and OS
+      placeholder: "RTX 4050 Laptop, NVIDIA 580.xx, Fedora (Wayland)"
+    validations:
+      required: true
+  - type: textarea
+    id: mods
+    attributes:
+      label: Other mods and shader pack
+      description: In particular Sodium, Iris (and which shader pack), Distant Horizons, and anything else that changes rendering.
+  - type: textarea
+    id: settings
+    attributes:
+      label: VFrameGen settings
+      description: The contents of config/vframegen.properties (or the settings you changed).
+      render: properties
+  - type: textarea
+    id: log
+    attributes:
+      label: Log or crash report
+      description: Attach logs/latest.log or a crash report from crash-reports/. For pacing problems, turn on the Debug → "Stats in the log" and "Pacing in the log" options first.
+      render: shell
