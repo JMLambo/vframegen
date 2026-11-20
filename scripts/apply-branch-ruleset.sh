@@ -13,7 +13,7 @@ file=".github/rulesets/main.json"
 name="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["name"])' "$file")"
 
 # Every page, and only this repository's own rulesets (not ones inherited from an organization).
-id="$(gh api --paginate "repos/$repo/rulesets?includes_parents=false" -q ".[] | select(.name == \"$name\") | .id" | head -n1)"
+id="$(gh api --paginate "repos/$repo/rulesets?includes_parents=false" -q ".[] | select(.name == \"$name\") | .id" | sed -n '1p')"
 if [ -n "$id" ]; then
     gh api --method PUT "repos/$repo/rulesets/$id" --input "$file" > /dev/null
     echo "Updated ruleset \"$name\" ($id) on $repo"
