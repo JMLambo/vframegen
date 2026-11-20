@@ -139,6 +139,7 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
         vec2 bestHit = skyUv;
         float bestHitNear = 0.0;
         bool haveHit = false;
+        float minHitNear = 2.0, maxHitNear = -2.0;
         vec2 bestMiss = skyUv;
         float bestMissNear = 0.0;
         bool haveMiss = false;
@@ -155,8 +156,9 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
                 float near = sky ? -1.0 : nearness(d);
                 vec2 cand = sky ? skyUv : uvc;
                 if (errPx < 1.0) {
-                    // Two matches at different depths: an edge, whichever was found first.
-                    if (haveHit && abs(near - bestHitNear) > 1.0e-4) contested = true;
+                    // Matches at different depths: an edge, whatever order they were found in.
+                    minHitNear = min(minHitNear, near);
+                    maxHitNear = max(maxHitNear, near);
                     if (!haveHit || near > bestHitNear) {
                         bestHit = cand;
                         bestHitNear = near;
@@ -173,7 +175,7 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
         }
         uvSrc = haveHit ? bestHit : bestMiss;
         w.near = haveHit ? bestHitNear : bestMissNear;
-        contested = contested || !haveHit;
+        contested = !haveHit || maxHitNear - minHitNear > 1.0e-4;
         w.hit = haveHit;
         w.reason = haveHit ? R_HIT : R_FILL;
     }
