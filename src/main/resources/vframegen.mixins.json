@@ -1,0 +1,15 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "io.github.jmlambo.vframegen.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "GameRendererAccessor",
+    "GameRendererMixin",
+    "MinecraftAccessor",
+    "MinecraftMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
