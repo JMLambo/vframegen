@@ -32,13 +32,15 @@ void main() {
     if (Flags.x > 0.5 && !isSky(texture(HandDepth, uv).r)) hand = 1.0;
     float locked = 0.0;
     if (Flags.y > 0.5) {
-        vec2 px = Params2.zw * 3.0;
-        if (nearAt(uv)
-                || nearAt(uv + vec2(px.x, 0.0)) || nearAt(uv - vec2(px.x, 0.0))
-                || nearAt(uv + vec2(0.0, px.y)) || nearAt(uv - vec2(0.0, px.y))
-                || nearAt(uv + px) || nearAt(uv - px)
-                || nearAt(uv + vec2(px.x, -px.y)) || nearAt(uv + vec2(-px.x, px.y))) {
-            locked = 1.0;
+        // Every texel within 3 px (a disc), so a thin item edge leaves no gaps.
+        for (int y = -3; y <= 3 && locked < 0.5; y++) {
+            for (int x = -3; x <= 3; x++) {
+                if (x * x + y * y > 10) continue;
+                if (nearAt(uv + vec2(x, y) * Params2.zw)) {
+                    locked = 1.0;
+                    break;
+                }
+            }
         }
     }
     fragColor = vec4(hand, locked, 0.0, 1.0);

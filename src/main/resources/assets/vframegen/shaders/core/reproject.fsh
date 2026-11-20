@@ -74,14 +74,20 @@ vec2 projectDirection(vec2 uvDst, mat4 srcViewProjRot) {
     vec3 dir = b.xyz / b.w - a.xyz / a.w;
     if (Params2.x < 0.5) dir = -dir; // without reversed Z, NDC z = 1 is the far end
     vec4 clip = srcViewProjRot * vec4(dir, 0.0);
+    // Behind the source camera: not in that frame at all.
+    if (clip.w <= 1.0e-6) return vec2(-1.0);
     return (clip.xy / clip.w) * 0.5 + 0.5;
 }
 
-vec2 landingSpot(vec2 uvSrc, float depth, mat4 invViewProj, mat4 dstViewProj) {
+// Where a source pixel lands in the output. z is 0 when it lands behind the output camera (or the
+// depth unprojects to nothing): never a match.
+vec3 landingSpot(vec2 uvSrc, float depth, mat4 invViewProj, mat4 dstViewProj) {
     float ndcZ = Params2.y > 0.5 ? depth : depth * 2.0 - 1.0;
     vec4 p = invViewProj * vec4(uvSrc * 2.0 - 1.0, ndcZ, 1.0);
+    if (abs(p.w) < 1.0e-12) return vec3(-1.0, -1.0, 0.0);
     vec4 clip = dstViewProj * vec4(p.xyz / p.w, 1.0);
-    return (clip.xy / clip.w) * 0.5 + 0.5;
+    if (clip.w <= 1.0e-6) return vec3(-1.0, -1.0, 0.0);
+    return vec3((clip.xy / clip.w) * 0.5 + 0.5, 1.0);
 }
 
 // Held item, from the mask built once per real frame (lockmask.fsh).
@@ -142,13 +148,16 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
                 vec2 uvc = clamp(uv, 0.0, 1.0);
                 float d = texture(depthTex, uvc).r;
                 bool sky = isSky(d);
-                vec2 landed = sky ? uvDst + (uvc - skyUv) : landingSpot(uvc, d, invViewProj, dstViewProj);
+                vec3 spot = sky ? vec3(uvDst + (uvc - skyUv), 1.0) : landingSpot(uvc, d, invViewProj, dstViewProj);
+                if (spot.z < 0.5) break; // behind the output camera: this chain can't go on
+                vec2 landed = spot.xy;
                 float errPx = length((landed - uvDst) * screen);
                 float near = sky ? -1.0 : nearness(d);
                 vec2 cand = sky ? skyUv : uvc;
                 if (errPx < 1.0) {
+                    // Two matches at different depths: an edge, whichever was found first.
+                    if (haveHit && abs(near - bestHitNear) > 1.0e-4) contested = true;
                     if (!haveHit || near > bestHitNear) {
-                        if (haveHit && abs(near - bestHitNear) > 1.0e-4) contested = true;
                         bestHit = cand;
                         bestHitNear = near;
                         haveHit = true;
@@ -183,6 +192,9 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
         for (int i = 0; i < 24 && nearLocked(mask, uv, flags); i++) {
             uv = clamp(uv + stepUv, vec2(0.0), vec2(1.0));
         }
+        // Still on the item (screen edge, or a wide item): the world here, unwarped, rather than a
+        // copy of the item.
+        if (nearLocked(mask, uv, flags)) uv = uvDst;
     }
     if (contested) {
         // At a depth edge, bilinear filtering would blend foreground into background.
