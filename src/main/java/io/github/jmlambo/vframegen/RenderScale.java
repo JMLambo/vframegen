@@ -138,6 +138,7 @@ public final class RenderScale {
 
     private static void ensure(int w, int h, GpuFormat color, GpuFormat depth) {
         if (w == fullW && h == fullH && color == colorFormat && depth == depthFormat && displayTex != null) return;
+        fullW = fullH = -1;
         release();
         GpuDevice device = RenderSystem.getDevice();
         int usage = GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_COPY_SRC

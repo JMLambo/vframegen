@@ -71,7 +71,7 @@ public final class FrameGenerator {
     private static final int UBO_SIZE = 7 * 64 + 5 * 16;
 
     /** What vanilla's blit + present show at the end of this loop. */
-    public enum Present { VANILLA, HELD, NOTHING }
+    public enum Present { VANILLA, HELD }
 
     // --- GPU resources --------------------------------------------------------------------------
     // Output size (the window). With render scale, depth and the pre-hand image are smaller.
@@ -356,14 +356,14 @@ public final class FrameGenerator {
         if (VFrameGen.config().displayHz > 0) refresh = VFrameGen.config().displayHz;
         if (!(refresh >= 30f)) refresh = 60f;
         int m = Math.clamp(VFrameGen.config().multiplier, 2, FrameGenConfig.MAX_MULTIPLIER);
-        int full = Math.round(refresh / m);
-        capFloor = Math.max(20, full / 2);
+        int full = Math.max(1, (int) Math.floor(refresh / m));
+        capFloor = Math.min(full, Math.max(20, full / 2));
         // With the present thread no idle time is needed: just never make more frames than the
         // display can show (the extra ones would be dropped unevenly).
         int cap = presentThreadActive() ? full : Math.max(capFloor, full - capAdjust);
         if (cap != lastAutoCap) {
             lastAutoCap = cap;
-            VFrameGen.LOGGER.info("Auto frame cap: {} real fps ({} Hz display / {}x, minus {} so generated frames fit)", cap, refresh, m, capAdjust);
+            if (VFrameGen.config().debugPacingLog) VFrameGen.LOGGER.info("Auto frame cap: {} real fps ({} Hz display / {}x, minus {} so generated frames fit)", cap, refresh, m, capAdjust);
         }
         return cap;
     }
@@ -584,9 +584,6 @@ public final class FrameGenerator {
         return submittingGenerated;
     }
 
-    public boolean shouldPresent() {
-        return present != Present.NOTHING;
-    }
 
     // =============================================================================================
     // Interpolated mode
@@ -903,7 +900,12 @@ public final class FrameGenerator {
         if (gpuTimersUnsupported || gpuTimers.size() >= 8) return null;
         try {
             GpuQueryPool pool = device.createTimestampQueryPool(2);
-            encoder.writeTimestamp(pool, 0);
+            try {
+                encoder.writeTimestamp(pool, 0);
+            } catch (RuntimeException e) {
+                pool.close();
+                throw e;
+            }
             gpuTimers.add(pool);
             return pool;
         } catch (RuntimeException e) {
@@ -1125,7 +1127,10 @@ public final class FrameGenerator {
             c.valid = false;
             return null;
         }
-        copy(main.getColorTexture(), c.finalImage);
+        if (!copy(main.getColorTexture(), c.finalImage)) {
+            c.valid = false;
+            return null;
+        }
         c.hasFinal = true;
         if (capture && !interpolated()) {
             DebugCapture.save(main.getColorTexture(), "9-real-next");
@@ -1293,6 +1298,8 @@ public final class FrameGenerator {
             }
         } catch (RuntimeException e) {
             fail(e);
+            // A swapchain image may still be acquired: have vanilla recreate the surface.
+            ((MinecraftAccessor) mc).vframegen$setSurfaceIsInvalid(true);
         }
     }
 

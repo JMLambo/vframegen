@@ -45,7 +45,6 @@ public abstract class MinecraftMixin {
 
     @WrapOperation(method = "renderFrame", at = @At(value = "INVOKE", target = PRESENT))
     private void vframegen$present(GpuSurface surface, Operation<Void> original) {
-        if (!FrameGenerator.INSTANCE.shouldPresent()) return;
         original.call(surface);
         FrameGenerator.INSTANCE.afterRealPresent();
         FrameGenerator.INSTANCE.generateAfterPresent((Minecraft) (Object) this);

@@ -34,15 +34,15 @@ final class ClothConfigScreen {
                 .setSaveConsumer(v -> cfg.multiplier = v).build());
         general.addEntry(e.startEnumSelector(t("mode"), FrameGenConfig.Mode.class, cfg.mode)
                 .setDefaultValue(def.mode).setTooltip(tip("mode"))
-                .setEnumNameProvider(v -> Component.translatable("vframegen.config.mode." + v.name().toLowerCase()))
+                .setEnumNameProvider(v -> Component.translatable("vframegen.config.mode." + v.name().toLowerCase(java.util.Locale.ROOT)))
                 .setSaveConsumer(v -> cfg.mode = v).build());
         general.addEntry(e.startEnumSelector(t("depthMode"), FrameGenConfig.DepthMode.class, cfg.depthMode)
                 .setDefaultValue(def.depthMode).setTooltip(tip("depthMode"))
-                .setEnumNameProvider(v -> Component.translatable("vframegen.config.depthMode." + v.name().toLowerCase()))
+                .setEnumNameProvider(v -> Component.translatable("vframegen.config.depthMode." + v.name().toLowerCase(java.util.Locale.ROOT)))
                 .setSaveConsumer(v -> cfg.depthMode = v).build());
         general.addEntry(e.startEnumSelector(t("pacing"), FrameGenConfig.Pacing.class, cfg.pacing)
                 .setDefaultValue(def.pacing).setTooltip(tip("pacing"))
-                .setEnumNameProvider(v -> Component.translatable("vframegen.config.pacing." + v.name().toLowerCase()))
+                .setEnumNameProvider(v -> Component.translatable("vframegen.config.pacing." + v.name().toLowerCase(java.util.Locale.ROOT)))
                 .setSaveConsumer(v -> cfg.pacing = v).build());
         general.addEntry(e.startBooleanToggle(t("presentThread"), cfg.presentThread)
                 .setDefaultValue(def.presentThread).setTooltip(tip("presentThread")).requireRestart()
@@ -50,7 +50,7 @@ final class ClothConfigScreen {
         general.addEntry(e.startBooleanToggle(t("autoCap"), cfg.autoCap)
                 .setDefaultValue(def.autoCap).setTooltip(tip("autoCap"))
                 .setSaveConsumer(v -> cfg.autoCap = v).build());
-        general.addEntry(e.startIntSlider(t("displayHz"), cfg.displayHz, 0, 360)
+        general.addEntry(e.startIntSlider(t("displayHz"), cfg.displayHz, 0, 500)
                 .setDefaultValue(def.displayHz).setTooltip(tip("displayHz"))
                 .setTextGetter(v -> v == 0 ? Component.translatable("vframegen.config.displayHz.auto") : Component.literal(v + " Hz"))
                 .setSaveConsumer(v -> cfg.displayHz = v).build());
