@@ -110,6 +110,15 @@ final class ClothConfigScreen {
         quality.addEntry(e.startFloatField(t("sharpness"), cfg.sharpness)
                 .setDefaultValue(def.sharpness).setMin(0).setMax(2).setTooltip(tip("sharpness"))
                 .setSaveConsumer(v -> cfg.sharpness = v).build());
+        var motionBlur = e.startBooleanToggle(t("motionBlur"), cfg.motionBlur)
+                .setDefaultValue(def.motionBlur).setTooltip(tip("motionBlur"))
+                .setSaveConsumer(v -> cfg.motionBlur = v).build();
+        quality.addEntry(motionBlur);
+        quality.addEntry(e.startIntSlider(t("motionBlurStrength"), Math.round(cfg.motionBlurStrength * 100), 10, 100)
+                .setDefaultValue(Math.round(def.motionBlurStrength * 100)).setTooltip(tip("motionBlurStrength"))
+                .setTextGetter(v -> Component.literal(v + "%"))
+                .setRequirement(Requirement.isTrue(motionBlur))
+                .setSaveConsumer(v -> cfg.motionBlurStrength = v / 100f).build());
         quality.addEntry(e.startFloatField(t("guiDiffThreshold"), cfg.guiDiffThreshold)
                 .setDefaultValue(def.guiDiffThreshold).setMin(0).setMax(0.5f).setTooltip(tip("guiDiffThreshold"))
                 .setSaveConsumer(v -> cfg.guiDiffThreshold = v).build());

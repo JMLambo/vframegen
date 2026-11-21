@@ -93,6 +93,19 @@ public final class FrameGenerator {
     private GpuBuffer maskUbo;
     private static final int MASK_UBO_SIZE = 2 * 16;
     private RenderPipeline maskPipeline;
+    // Motion blur (motionblur.fsh): its output, and the camera of the frame shown before.
+    private GpuTexture blurTex;
+    private GpuTextureView blurView;
+    private GpuBuffer blurUbo;
+    private static final int BLUR_UBO_SIZE = 3 * 64 + 2 * 16;
+    private final Map<GpuFormat, RenderPipeline> blurPipelines = new HashMap<>();
+    private final Vector3d prevShownPos = new Vector3d();
+    private final Matrix4f prevShownViewRot = new Matrix4f();
+    private final Matrix4f prevShownProj = new Matrix4f();
+    private boolean prevShownValid;
+    // The real frame the last generated frame was built from (its depth), and that frame's camera.
+    private FrameSlot genSrc;
+    private final Vector3d genPos = new Vector3d();
     // GPU time of the reprojection pass, from timestamp queries read back a few frames later.
     private final ArrayDeque<GpuQueryPool> gpuTimers = new ArrayDeque<>();
     private boolean gpuTimersUnsupported;
@@ -278,6 +291,7 @@ public final class FrameGenerator {
     public void loopStart(Minecraft mc) {
         StallProbe.loopStart();
         VsyncGuard.enforce(mc);
+        PackBlurCheck.tick(mc);
         frameProjCaptured = false;
         frameWorldDepthCaptured = false;
         frameHandCaptured = false;
@@ -529,6 +543,7 @@ public final class FrameGenerator {
         StallProbe.mark("world+gui");
         FrameSlot heldBefore = held, shownBefore = shown;
         GpuTextureView v = beforeBlit0(mc, vanillaView);
+        GpuTextureView shownView = v;
         if (presentThreadActive()) PresentThread.setNext(PresentThread.Kind.REAL, 0, 0);
         // Signalled when the GPU has finished this loop's submission (the real frame and its blit).
         if (realFence != null) realFence.close();
@@ -554,7 +569,95 @@ public final class FrameGenerator {
             DebugCapture.sequenceFrame(f != null ? f.finalImage : null, "real-direct", f == null ? "vanilla" : String.format(Locale.ROOT,
                     "newest frame directly, pos %.4f %.4f %.4f (held was %s)", f.pos.x, f.pos.y, f.pos.z, heldBefore == null ? "none" : "dropped"));
         }
-        return v;
+        return blurReal(shownView, vanillaView);
+    }
+
+    /** Motion blur for the real frame about to be shown (view): the slot it is, or vanilla's. */
+    private GpuTextureView blurReal(GpuTextureView view, GpuTextureView vanillaView) {
+        if (view == null || !active()) {
+            prevShownValid = false;
+            return view;
+        }
+        // Shown is the frame on screen now: the held one, or (vanilla view) the newest one.
+        FrameSlot s = shown;
+        if (s == null || !s.valid || (view != vanillaView && view != s.finalView)) {
+            prevShownValid = false;
+            return view;
+        }
+        try {
+            return motionBlur(RenderSystem.getDevice().createCommandEncoder(), view, s, s.pos, s.viewRot, s.proj);
+        } catch (RuntimeException e) {
+            fail(e);
+            return view;
+        }
+    }
+
+    /**
+     * Blur color (a frame about to be shown, for the camera pos / viewRot / proj) along the camera's
+     * motion since the frame shown before it, using src's depth. Returns what to show: color itself
+     * when blur is off or there is no previous frame to blur from.
+     */
+    private GpuTextureView motionBlur(CommandEncoder encoder, GpuTextureView color, FrameSlot src,
+                                      Vector3d pos, Matrix4f viewRot, Matrix4f proj) {
+        FrameGenConfig cfg = VFrameGen.config();
+        boolean hadPrev = prevShownValid;
+        Matrix4f prevViewProj = new Matrix4f(prevShownProj).mul(prevShownViewRot).translate(
+                (float) (src.pos.x - prevShownPos.x), (float) (src.pos.y - prevShownPos.y), (float) (src.pos.z - prevShownPos.z));
+        double jump = prevShownPos.distance(pos);
+        prevShownPos.set(pos);
+        prevShownViewRot.set(viewRot);
+        prevShownProj.set(proj);
+        prevShownValid = true;
+        // A teleport or respawn is not motion.
+        if (!cfg.motionBlur || !hadPrev || src == null || blurView == null || jump > cfg.maxCameraJumpBlocks) return color;
+
+        GpuDevice device = RenderSystem.getDevice();
+        boolean zeroToOne = device.getDeviceInfo().isZZeroToOne();
+        boolean reversedZ = ndcDepthAt(src.proj, 1.0f) > ndcDepthAt(src.proj, 100.0f);
+        boolean handBuffer = src.hasHand && !Compat.irisShadersActive();
+        boolean nearLock = !handBuffer && src.firstPerson;
+        Matrix4f srcInvViewProj = new Matrix4f(src.proj).mul(src.viewRot).invert();
+        Matrix4f curViewProj = new Matrix4f(proj).mul(viewRot).translate(
+                (float) (src.pos.x - pos.x), (float) (src.pos.y - pos.y), (float) (src.pos.z - pos.z));
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            ByteBuffer data = Std140Builder.onStack(stack, BLUR_UBO_SIZE)
+                    .putMat4f(srcInvViewProj).putMat4f(curViewProj).putMat4f(prevViewProj)
+                    .putVec4(cfg.motionBlurStrength, reversedZ ? 1f : 0f, zeroToOne ? 1f : 0f, cfg.guiDiffThreshold)
+                    .putVec4(1f / width, 1f / height, handBuffer ? 1f : 0f, nearLock ? 1f : 0f)
+                    .get();
+            encoder.writeToBuffer(blurUbo.slice(), data);
+        }
+        GpuSampler nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
+        try (RenderPass pass = encoder.createRenderPass(() -> "VFrameGen motion blur", blurView, Optional.empty())) {
+            pass.setPipeline(RenderSystem.getCompiledPipeline(blurPipeline(colorFormat)));
+            // Nearest, like the GUI / hand tests: a filtered tap next to the GUI would blend it in.
+            pass.setUniform("Color", color, nearest);
+            pass.setUniform("World", src.worldView, nearest);
+            pass.setUniform("Final", src.finalView, nearest);
+            pass.setUniform("Depth", src.depthView, nearest);
+            pass.setUniform("Mask", src.maskView, nearest);
+            pass.setUniform("MotionBlur", blurUbo);
+            pass.draw(3, 1, 0, 0);
+        }
+        return blurView;
+    }
+
+    private RenderPipeline blurPipeline(GpuFormat format) {
+        return blurPipelines.computeIfAbsent(format, f -> RenderPipeline.builder()
+                .withLocation(Identifier.fromNamespaceAndPath(VFrameGen.MOD_ID, "pipeline/motionblur_" + f.name().toLowerCase(Locale.ROOT)))
+                .withVertexShader("core/screenquad")
+                .withFragmentShader(Identifier.fromNamespaceAndPath(VFrameGen.MOD_ID, "core/motionblur"))
+                .withBindGroupLayout(BindGroupLayout.builder()
+                        .withUniform("Color", UniformType.COMBINED_IMAGE_SAMPLER)
+                        .withUniform("World", UniformType.COMBINED_IMAGE_SAMPLER)
+                        .withUniform("Final", UniformType.COMBINED_IMAGE_SAMPLER)
+                        .withUniform("Depth", UniformType.COMBINED_IMAGE_SAMPLER)
+                        .withUniform("Mask", UniformType.COMBINED_IMAGE_SAMPLER)
+                        .withUniform("MotionBlur", UniformType.UNIFORM_BUFFER)
+                        .build())
+                .withColorTargetState(new ColorTargetState(Optional.empty(), f, ColorTargetState.WRITE_ALL))
+                .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
+                .build());
     }
 
     private GpuTextureView beforeBlit0(Minecraft mc, GpuTextureView vanillaView) {
@@ -884,7 +987,8 @@ public final class FrameGenerator {
             DebugCapture.sequenceFrame(outTex, "gen", String.format(Locale.ROOT, "f=%.3f (%s) pos %.4f %.4f %.4f",
                     lastGenF, where, lastGenPos.x, lastGenPos.y, lastGenPos.z));
         }
-        surface.blitFromTexture(encoder, outView);
+        GpuTextureView shownView = genSrc != null ? motionBlur(encoder, outView, genSrc, genPos, dstViewRot, dstProj) : outView;
+        surface.blitFromTexture(encoder, shownView);
         submittingGenerated = true;
         try {
             encoder.submit();
@@ -938,6 +1042,9 @@ public final class FrameGenerator {
         Matrix4f dstViewProjRot = new Matrix4f(dstProj).mul(dstViewRot);
         Matrix4f dstInvViewProjRot = new Matrix4f(dstViewProjRot).invert();
         FrameSlot bb = b != null ? b : a;
+        // Motion blur takes depth from the frame that builds most of the picture.
+        genSrc = b != null && t >= 0.5f ? b : a;
+        genPos.set(dstPos);
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
             Std140Builder ub = Std140Builder.onStack(stack, UBO_SIZE).putMat4f(dstInvViewProjRot);
@@ -1265,6 +1372,15 @@ public final class FrameGenerator {
                 GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_SRC,
                 color, w, h, 1, 1);
         outView = device.createTextureView(outTex);
+        if (blurView != null) blurView.close();
+        if (blurTex != null) blurTex.close();
+        blurTex = device.createTexture("VFrameGen motion blur",
+                GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_SRC,
+                color, w, h, 1, 1);
+        blurView = device.createTextureView(blurTex);
+        if (blurUbo == null) {
+            blurUbo = device.createBuffer(() -> "VFrameGen motion blur uniforms", GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, BLUR_UBO_SIZE);
+        }
         if (ubo == null) {
             ubo = device.createBuffer(() -> "VFrameGen uniforms", GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, UBO_SIZE);
         }
