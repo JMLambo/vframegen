@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0-alpha.8
 
 - No more oval of moving world in a still frame with shaders off: vanilla's vignette (drawn with the
   GUI) was taken for GUI and kept unwarped. With frame generation on it is now drawn on every shown
