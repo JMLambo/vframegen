@@ -17,6 +17,7 @@ import com.mojang.renderpearl.api.textures.FilterMode;
 import com.mojang.renderpearl.api.textures.GpuSampler;
 import com.mojang.renderpearl.api.textures.GpuTexture;
 import com.mojang.renderpearl.api.textures.GpuTextureView;
+import io.github.jmlambo.vframegen.mixin.RenderSystemAccessor;
 import io.github.jmlambo.vframegen.mixin.RenderTargetAccessor;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.resources.Identifier;
@@ -75,6 +76,9 @@ public final class RenderScale {
      */
     public static void upscaleAndSwap(GameRenderer gr, int windowW, int windowH) {
         if (swappedTarget != null || broken) return;
+        // Until the first resource reload is done, only vanilla's shaders can load, and every
+        // failed try logs a "Couldn't preload shader" stack trace.
+        if (RenderSystemAccessor.vframegen$getCurrentPipelineCache() == null) return;
         RenderTarget main = gr.mainRenderTarget();
         if (main.width == windowW && main.height == windowH) return;
         GpuTexture color = main.getColorTexture();
