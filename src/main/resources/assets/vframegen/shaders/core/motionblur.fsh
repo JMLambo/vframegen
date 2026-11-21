@@ -130,5 +130,8 @@ vec3 blurred(vec2 uv, vec3 center) {
 void main() {
     vec2 uv = texCoord;
     vec3 color = blurred(uv, texture(Color, uv).rgb);
-    fragColor = vec4(crosshair(color, uv), 1.0);
+    // Under the GUI and behind the held item, like vanilla's (drawn before the GUI, depth-tested
+    // against the hand).
+    if (!fixedPixel(uv)) color = crosshair(color, uv);
+    fragColor = vec4(color, 1.0);
 }
