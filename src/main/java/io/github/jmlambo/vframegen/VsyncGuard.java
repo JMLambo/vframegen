@@ -9,7 +9,8 @@ import net.minecraft.network.chat.Component;
 /**
  * VSync and frame generation fight: VSync rounds every present to a screen refresh, so generated
  * frames timed between real ones are shown twice or dropped (heavy stutter), and the present queue
- * backs up. With frame generation on, VSync found on at startup is turned off. Turned on later in
+ * backs up. With frame generation on, VSync found on at startup (or when frame generation is turned
+ * on) is turned off. Turned on later in
  * a settings screen, it is left alone until the player leaves that screen, and then a prompt asks
  * whether to keep it. Asking then, not while the settings screen is open, keeps every options
  * screen (vanilla, Sodium and others, which cache option values) showing the real value.
@@ -17,6 +18,7 @@ import net.minecraft.network.chat.Component;
 public final class VsyncGuard {
     private static boolean seen;          // the VSync setting has been looked at once (startup done)
     private static boolean lastVsync;
+    private static boolean lastEnabled;   // frame generation on, last loop
     private static boolean promptPending; // turned on during this session: ask after leaving the screen
     private static Screen turnedOnIn;     // the screen it was turned on in
     private static boolean confirming;
@@ -33,8 +35,22 @@ public final class VsyncGuard {
         if (!seen) {
             seen = true;
             lastVsync = on;
+            lastEnabled = cfg.enabled;
+            if (!on && cfg.allowVsync) {
+                // Off already (changed while the mod was absent, say): ask again next time.
+                cfg.allowVsync = false;
+                cfg.save();
+            }
             if (on && cfg.enabled && !cfg.allowVsync) turnOff(mc, "found on at startup");
             return;
+        }
+        if (cfg.enabled != lastEnabled) {
+            lastEnabled = cfg.enabled;
+            // Frame generation just turned on: the startup rule applies.
+            if (cfg.enabled && on && !cfg.allowVsync) {
+                turnOff(mc, "frame generation turned on");
+                return;
+            }
         }
         if (on != lastVsync) {
             lastVsync = on;
