@@ -354,7 +354,9 @@ public final class FrameGenerator {
     }
 
     public int frameLimit(Minecraft mc, int limit) {
-        if (limit < 260 || !active() || !interpolated() || !VFrameGen.config().autoCap) return limit;
+        if (limit < 260 || !active() || !VFrameGen.config().autoCap) return limit;
+        // Fixed multiplier: only interpolation needs the cap. Adaptive caps at the target in both modes.
+        if (!interpolated() && !VFrameGen.config().adaptive) return limit;
         if (mc.level == null || mc.isPaused()) return limit;
         // The monitor the window is on (its current mode). The window's "active video mode" is the
         // fullscreen mode setting and read 60 Hz on a 120 Hz screen.
