@@ -41,6 +41,7 @@ public final class FrameGenConfig {
     public double renderScale = 1.0;
     public boolean autoCap = true;
     public boolean presentThread = true;
+    public boolean allowVsync = false;
     public int displayHz = 0;
     public double upscaleSharpness = 0.5;
     public Upscaler upscaler = Upscaler.BICUBIC;
@@ -78,6 +79,8 @@ public final class FrameGenConfig {
             sharpness               unsharp mask applied to generated frames, 0 = off.
             displayHz               refresh rate the auto cap divides (0 = ask the system; some virtual
                                     displays report 60 Hz when they run faster).
+            allowVsync              keep VSync on with frame generation (set when you confirm turning it
+                                    on; otherwise VSync is turned off, since it makes frames stutter).
             presentThread           Vulkan: show frames from a thread of their own, each at its exact time
                                     (needs a restart to change). No frame cap needed.
             autoCap                 with Max Framerate unlimited, cap real frames at the display's refresh
@@ -131,6 +134,7 @@ public final class FrameGenConfig {
                 c.debugStallLog = bool(props, "debugStallLog", c.debugStallLog);
                 c.autoCap = bool(props, "autoCap", c.autoCap);
                 c.presentThread = bool(props, "presentThread", c.presentThread);
+                c.allowVsync = bool(props, "allowVsync", c.allowVsync);
                 c.displayHz = Math.max(0, Math.min(500, (int) dbl(props, "displayHz", c.displayHz)));
                 c.renderScale = Math.clamp(dbl(props, "renderScale", c.renderScale), 0.5, 1.0);
                 c.upscaler = enumOf(props, "upscaler", c.upscaler, Upscaler.class);
@@ -167,6 +171,7 @@ public final class FrameGenConfig {
         values.put("debugStallLog", Boolean.toString(debugStallLog));
         values.put("autoCap", Boolean.toString(autoCap));
         values.put("presentThread", Boolean.toString(presentThread));
+        values.put("allowVsync", Boolean.toString(allowVsync));
         values.put("displayHz", Integer.toString(displayHz));
         values.put("renderScale", Double.toString(renderScale));
         values.put("upscaleSharpness", Double.toString(upscaleSharpness));

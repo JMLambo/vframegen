@@ -39,14 +39,14 @@ Requires Java 25, which Minecraft 26.3 already uses.
 |---|---|
 | Minecraft | 26.3, Fabric Loader 0.19.5+ |
 | Backend | Vulkan (present thread) and OpenGL, both with and without shader packs |
-| GPU / OS | NVIDIA RTX 4050 Laptop and AMD Radeon 660M (integrated, RADV), Linux (Fedora, KDE Wayland) |
+| GPU / OS | NVIDIA RTX 4050 Laptop and AMD Radeon 660M (integrated, RADV), Linux (Fedora, KDE Wayland); NVIDIA GTX 1060 3 GB with an i7-7700 and 8 GB RAM, Windows (vanilla renderer, Vulkan) |
 | Mods | Sodium 0.9.3-beta.4, Iris 1.12 (a local build with Distant Horizons 3.4 support), Distant Horizons 3.4.0-RC2, Controlify 3.5.3, Reflex 1.1.6. Also tested without Sodium, Iris and Distant Horizons (vanilla renderer) on both backends. |
 | Shader packs | Complementary Unbound r5.10 + Euphoria Patches 1.11.2 (RTX 4050), Mellow 3.5 (Radeon 660M: about 30 real fps on its Fancy preset) |
 
 On integrated graphics, frame generation itself is cheap (about 0.4 ms per generated frame on the
 660M); Distant Horizons is the biggest cost, so set its CPU and Quality presets low.
 
-Reports from other GPUs (Intel, desktop AMD), Windows, and other shader packs are very welcome.
+Reports from other GPUs (Intel, desktop AMD) and other shader packs are very welcome.
 
 ## How it works
 
@@ -130,7 +130,9 @@ frames.
 
 ## Tips
 
-- **Turn VSync off.** The present thread does the pacing.
+- **Leave VSync off.** The present thread does the pacing, and VSync makes generated frames stutter
+  (they get shown twice or dropped). With frame generation on, VFrameGen turns VSync off at startup,
+  and if you turn it back on it asks whether to keep it.
 - Leave **Max Framerate** on Unlimited and let the auto cap pick the real frame rate.
 - Install [Reflex AntiLag](https://www.curseforge.com/minecraft/mc-mods/reflex-antilag) to cut input lag. Interpolation still adds about
   one real frame, so a lower multiplier (higher real frame rate) also feels more responsive.
@@ -151,7 +153,7 @@ frames.
 - Transparent HUD parts show the world behind them as of the nearer real frame.
 - The GUI is not warped, so HUD elements that turn with the camera (the F3 axis gizmo) only
   update at the real frame rate and trail behind the world while turning.
-- Intel and desktop AMD GPUs, and Windows, have not been tested yet.
+- Intel and desktop AMD GPUs have not been tested yet, and Windows only on one older PC.
 
 ## Building
 
