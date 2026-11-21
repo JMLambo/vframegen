@@ -106,11 +106,17 @@ bool offscreen(vec2 uv) {
 vec3 sceneColor(sampler2D world, sampler2D noHand, sampler2D mask, vec2 uv, vec4 flags) {
     bool behindHand = false;
     if (flags.x > 0.5) {
-        // Within a pixel of the hand too: a filtered World read there would pick up its edge.
+        // Within a pixel of the hand too (the whole 3x3 around uv): a filtered World read there
+        // would pick up its edge.
         vec2 px = Params2.zw;
-        behindHand = texture(mask, uv).r > 0.5 || texture(mask, uv + vec2(px.x, 0.0)).r > 0.5
-                  || texture(mask, uv - vec2(px.x, 0.0)).r > 0.5 || texture(mask, uv + vec2(0.0, px.y)).r > 0.5
-                  || texture(mask, uv - vec2(0.0, px.y)).r > 0.5;
+        for (int y = -1; y <= 1 && !behindHand; y++) {
+            for (int x = -1; x <= 1; x++) {
+                if (texture(mask, uv + vec2(x, y) * px).r > 0.5) {
+                    behindHand = true;
+                    break;
+                }
+            }
+        }
     }
     return behindHand ? texture(noHand, uv).rgb : texture(world, uv).rgb;
 }
