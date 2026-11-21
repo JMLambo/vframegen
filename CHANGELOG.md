@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0-alpha.7
 
 - The F3 crosshair (axis gizmo) no longer trails while turning: with frame generation on it is drawn
   on every shown frame, real and generated, for that frame's camera rotation.
@@ -9,6 +9,7 @@
   held item stay sharp. A toast warns when the shader pack's own motion blur is on (it ghosts).
 - With render scale below 1.0, the log no longer fills with "Couldn't preload shader vframegen:…"
   errors during startup: the upscaler now waits until the game has loaded mod shaders.
+- Tested with Sodium 0.9.3 and with a shader pack's depth of field (Complementary): no issues.
 
 ## 0.1.0-alpha.6
 
