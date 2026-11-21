@@ -16,6 +16,8 @@ public final class FrameGenConfig {
     public enum Pacing { OFF, BALANCED }
 
     public static final int MAX_MULTIPLIER = 6;
+    /** Vanilla's frame limiter only applies limits below 260 (260 means unlimited). */
+    public static final int MAX_TARGET_FPS = 250;
 
     /** The most frames shown per real frame with these settings (sizes the swapchain). */
     public int maxFramesPerReal() {
@@ -55,7 +57,7 @@ public final class FrameGenConfig {
                                     real one). Costs GPU time per extra frame, no extra VRAM.
             adaptive                instead of a fixed multiplier, pick frames per real frame (1 to 6)
                                     to reach targetFps. Real frames are capped at targetFps.
-            targetFps               30 to 500: frames per second shown in adaptive mode.
+            targetFps               30 to 250: frames per second shown in adaptive mode.
             disableWhileScreenOpen  only generate while no menu or inventory is open.
             mode                    INTERPOLATED or LOW_LATENCY. INTERPOLATED holds each real frame back by
                                     one frame and builds the in-between frames from both neighbours: no
@@ -106,7 +108,7 @@ public final class FrameGenConfig {
                 c.enabled = bool(props, "enabled", c.enabled);
                 c.multiplier = Math.clamp((int) dbl(props, "multiplier", c.multiplier), 2, MAX_MULTIPLIER);
                 c.adaptive = bool(props, "adaptive", c.adaptive);
-                c.targetFps = Math.clamp((int) dbl(props, "targetFps", c.targetFps), 30, 500);
+                c.targetFps = Math.clamp((int) dbl(props, "targetFps", c.targetFps), 30, MAX_TARGET_FPS);
                 c.disableWhileScreenOpen = bool(props, "disableWhileScreenOpen", c.disableWhileScreenOpen);
                 c.mode = enumOf(props, "mode", c.mode, Mode.class);
                 c.depthMode = enumOf(props, "depthMode", c.depthMode, DepthMode.class);

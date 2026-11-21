@@ -40,7 +40,7 @@ final class ClothConfigScreen {
         general.addEntry(e.startBooleanToggle(t("adaptive"), cfg.adaptive)
                 .setDefaultValue(def.adaptive).setTooltip(tip("adaptive"))
                 .setSaveConsumer(v -> cfg.adaptive = v).build());
-        general.addEntry(e.startIntSlider(t("targetFps"), cfg.targetFps, 30, 500)
+        general.addEntry(e.startIntSlider(t("targetFps"), cfg.targetFps, 30, FrameGenConfig.MAX_TARGET_FPS)
                 .setDefaultValue(def.targetFps).setTooltip(tip("targetFps"))
                 .setTextGetter(v -> Component.literal(v + " fps"))
                 .setSaveConsumer(v -> cfg.targetFps = v).build());

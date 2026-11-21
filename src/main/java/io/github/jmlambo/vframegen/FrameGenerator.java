@@ -374,7 +374,8 @@ public final class FrameGenerator {
         capFloor = Math.min(full, Math.max(20, full / 2));
         // With the present thread no idle time is needed: just never make more frames than the
         // display can show (the extra ones would be dropped unevenly).
-        int cap = presentThreadActive() ? full : Math.max(capFloor, full - capAdjust);
+        // The idle-time adjustment is measured and recovered by interpolation only.
+        int cap = presentThreadActive() || !interpolated() ? full : Math.max(capFloor, full - capAdjust);
         if (cap != lastAutoCap) {
             lastAutoCap = cap;
             if (VFrameGen.config().debugPacingLog) VFrameGen.LOGGER.info("Auto frame cap: {} real fps ({} Hz display / {}x, minus {} so generated frames fit)", cap, refresh, m, capAdjust);
