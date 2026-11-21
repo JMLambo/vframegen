@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0-alpha.4
+
+- Generated frames never slow down real frames: when no swapchain image is free, the rest of a
+  pair's generated frames are skipped instead of waited for. With a large modpack at a high
+  adaptive multiplier this doubled the real frame rate (10–16 → 24–35 fps). The swapchain gets
+  two pairs' worth of images where the driver allows it.
+- Shader packs: blocks right next to the camera are no longer taken for the held item (only
+  things nearer than 0.2 blocks are), so they warp instead of jumping between real frames.
+- F8 debug captures also save images when the game renders in half float (RGBA16F).
+
 ## 0.1.0-alpha.3
 
 - Adaptive frame generation: a toggle and a target frame rate (up to 250 fps). Frames per real
