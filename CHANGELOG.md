@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- New upscaler option for render scale: Edge-adaptive (FSR 1 style EASU + RCAS), next to the
+  existing Bicubic.
+
 ## 0.1.0-alpha.2
 
 - Much higher real frame rate at 3x and above with the present thread: the swapchain now has

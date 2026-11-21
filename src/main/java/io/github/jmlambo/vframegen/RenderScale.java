@@ -31,7 +31,7 @@ import java.util.Optional;
 /**
  * Render scale: the world (and the shader pack, and Distant Horizons) renders into a main target
  * smaller than the window. Right after the world is finished, it is upscaled (edge-aware bicubic,
- * then contrast-adaptive sharpening) into full-size textures, and those are swapped into the main
+ * then contrast-adaptive sharpening, or FSR 1 style EASU + RCAS) into full-size textures, and those are swapped into the main
  * target for the GUI and the final blit, so the GUI stays sharp. The low-resolution textures are
  * swapped back right after the blit, before the next frame renders.
  */
@@ -183,14 +183,15 @@ public final class RenderScale {
         }
         GpuSampler linear = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);
         GpuSampler nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
+        boolean edgeAdaptive = VFrameGen.config().upscaler == FrameGenConfig.Upscaler.EDGE_ADAPTIVE;
         try (RenderPass pass = encoder.createRenderPass(() -> "VFrameGen upscale", tempView, Optional.empty())) {
-            pass.setPipeline(RenderSystem.getCompiledPipeline(pipeline("upscale", colorFormat)));
-            pass.setUniform("Source", src, linear);
+            pass.setPipeline(RenderSystem.getCompiledPipeline(pipeline(edgeAdaptive ? "easu" : "upscale", colorFormat)));
+            pass.setUniform("Source", src, edgeAdaptive ? nearest : linear);
             pass.setUniform("Upscale", ubo);
             pass.draw(3, 1, 0, 0);
         }
         try (RenderPass pass = encoder.createRenderPass(() -> "VFrameGen sharpen", displayView, Optional.empty())) {
-            pass.setPipeline(RenderSystem.getCompiledPipeline(pipeline("sharpen", colorFormat)));
+            pass.setPipeline(RenderSystem.getCompiledPipeline(pipeline(edgeAdaptive ? "rcas" : "sharpen", colorFormat)));
             pass.setUniform("Source", tempView, nearest);
             pass.setUniform("Upscale", ubo);
             pass.draw(3, 1, 0, 0);
