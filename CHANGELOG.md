@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Anti-aliasing (Quality, off by default): FXAA on the world, before the GUI, so the HUD stays sharp
+  and generated frames are built from the smoothed image. Works with or without frame generation.
 ## 0.1.0-alpha.8
 
 - No more oval of moving world in a still frame with shaders off: vanilla's vignette (drawn with the
