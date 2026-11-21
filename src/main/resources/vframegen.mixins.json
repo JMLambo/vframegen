@@ -8,6 +8,7 @@
     "GameRendererAccessor",
     "GameRendererMixin",
     "GlTransientMemoryMixin",
+    "HudMixin",
     "MinecraftAccessor",
     "MinecraftMixin",
     "RenderSystemAccessor",

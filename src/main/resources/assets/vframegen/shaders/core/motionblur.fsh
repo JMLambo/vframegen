@@ -16,12 +16,17 @@
 // The F3 crosshair (the axis gizmo) is drawn here too, on top, for this frame's camera rotation:
 // it turns with the camera, so the copy in a real frame's GUI would lag behind in generated frames.
 // The real frame is rendered without it while frame generation is on.
+//
+// Vanilla's vignette (the darkened screen edges) is applied here too, for the same reason: it is
+// drawn with the GUI, so the GUI test took every darkened pixel for GUI and kept it unwarped (an
+// oval of moving world in the middle of a still frame). The real frame's GUI is drawn without it.
 
 uniform sampler2D Color;  // the frame to show (world + GUI)
 uniform sampler2D World;  // Src world before the GUI
 uniform sampler2D Final;  // Src world + GUI
 uniform sampler2D Depth;  // Src depth
 uniform sampler2D Mask;   // Src held item mask (lockmask.fsh)
+uniform sampler2D Vignette; // vanilla's vignette texture (bound to Color when there is none)
 
 layout(std140) uniform MotionBlur {
     mat4 SrcInvViewProj; // Src NDC -> position relative to Src's camera (rotation only)
@@ -32,6 +37,7 @@ layout(std140) uniform MotionBlur {
     vec4 Cross;          // xy: crosshair centre (uv), z: draw it, w: line width scale
     vec4 CrossTip[3];    // xy: axis end (uv), farthest first
     vec4 CrossColor[3];
+    vec4 VignetteColor;  // rgb: vanilla's vignette color, w: apply it
 };
 
 layout(location = 0) in vec2 texCoord;
@@ -43,10 +49,14 @@ bool isSky(float d) {
     return Params.y > 0.5 ? d <= 1.0e-7 : d >= 1.0 - 1.0e-7;
 }
 
+bool guiPixel(vec2 uv) {
+    vec3 diff = abs(texture(Final, uv).rgb - texture(World, uv).rgb);
+    return max(diff.r, max(diff.g, diff.b)) > Params.w;
+}
+
 // GUI or held item at uv: kept sharp, and never sampled into the world.
 bool fixedPixel(vec2 uv) {
-    vec3 diff = abs(texture(Final, uv).rgb - texture(World, uv).rgb);
-    if (max(diff.r, max(diff.g, diff.b)) > Params.w) return true;
+    if (guiPixel(uv)) return true;
     vec2 m = texture(Mask, uv).rg;
     return (Params2.z > 0.5 && m.r > 0.5) || (Params2.w > 0.5 && m.g > 0.5);
 }
@@ -133,5 +143,9 @@ void main() {
     // Under the GUI and behind the held item, like vanilla's (drawn before the GUI, depth-tested
     // against the hand).
     if (!fixedPixel(uv)) color = crosshair(color, uv);
+    // Vanilla blends it as dst * (1 - texture * color), over the world and the hand, under the GUI.
+    if (VignetteColor.w > 0.5 && !guiPixel(uv)) {
+        color *= 1.0 - texture(Vignette, uv).rgb * VignetteColor.rgb;
+    }
     fragColor = vec4(color, 1.0);
 }
