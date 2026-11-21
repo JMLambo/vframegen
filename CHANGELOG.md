@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The F3 crosshair (axis gizmo) no longer trails while turning: with frame generation on it is drawn
+  on every shown frame, real and generated, for that frame's camera rotation.
 - Motion blur (Quality, off by default): camera motion blur on every frame shown, real and
   generated, along that frame's own motion, so its length is right at any multiplier. GUI and the
   held item stay sharp. A toast warns when the shader pack's own motion blur is on (it ghosts).

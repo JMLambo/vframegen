@@ -12,6 +12,10 @@
 // The depth comes from the real frame the image was built from (Src), at the same screen spot.
 // For a generated frame that is off by a fraction of a frame's motion, which a blur does not show.
 // GUI and the held item are not blurred, and are not smeared into the world next to them.
+//
+// The F3 crosshair (the axis gizmo) is drawn here too, on top, for this frame's camera rotation:
+// it turns with the camera, so the copy in a real frame's GUI would lag behind in generated frames.
+// The real frame is rendered without it while frame generation is on.
 
 uniform sampler2D Color;  // the frame to show (world + GUI)
 uniform sampler2D World;  // Src world before the GUI
@@ -25,6 +29,9 @@ layout(std140) uniform MotionBlur {
     mat4 PrevViewProj;   // position relative to Src's camera -> the previous shown frame's clip
     vec4 Params;   // x: strength (fraction of the frame interval), y: reversed Z, z: depth zero-to-one, w: GUI threshold
     vec4 Params2;  // x: 1/width, y: 1/height, z: hand buffer valid, w: near-depth hand lock
+    vec4 Cross;          // xy: crosshair centre (uv), z: draw it, w: line width scale
+    vec4 CrossTip[3];    // xy: axis end (uv), farthest first
+    vec4 CrossColor[3];
 };
 
 layout(location = 0) in vec2 texCoord;
@@ -48,13 +55,33 @@ vec2 toUv(vec4 clip) {
     return (clip.xy / clip.w) * 0.5 + 0.5;
 }
 
-void main() {
-    vec2 uv = texCoord;
-    vec3 center = texture(Color, uv).rgb;
-    if (fixedPixel(uv)) {
-        fragColor = vec4(center, 1.0);
-        return;
+float segmentDistancePx(vec2 p, vec2 a, vec2 b) {
+    vec2 size = 1.0 / Params2.xy;
+    p *= size;
+    a *= size;
+    b *= size;
+    vec2 ab = b - a;
+    float t = clamp(dot(p - a, ab) / max(dot(ab, ab), 1.0e-6), 0.0, 1.0);
+    return length(p - a - ab * t);
+}
+
+// Like vanilla's: a black outline under each axis, then the axes, the nearest on top.
+vec3 crosshair(vec3 color, vec2 uv) {
+    if (Cross.z < 0.5) return color;
+    float outline = 2.0 * Cross.w, fill = 1.0 * Cross.w;
+    for (int i = 0; i < 3; i++) {
+        float d = segmentDistancePx(uv, Cross.xy, CrossTip[i].xy);
+        color = mix(color, vec3(0.0), clamp(outline + 0.5 - d, 0.0, 1.0));
     }
+    for (int i = 0; i < 3; i++) {
+        float d = segmentDistancePx(uv, Cross.xy, CrossTip[i].xy);
+        color = mix(color, CrossColor[i].rgb, clamp(fill + 0.5 - d, 0.0, 1.0));
+    }
+    return color;
+}
+
+vec3 blurred(vec2 uv, vec3 center) {
+    if (Params.x <= 0.0 || fixedPixel(uv)) return center;
 
     float d = texture(Depth, uv).r;
     vec2 ndc = uv * 2.0 - 1.0;
@@ -74,16 +101,14 @@ void main() {
     vec4 cur = CurViewProj * p;
     vec4 prev = PrevViewProj * p;
     if (cur.w <= 1.0e-6 || prev.w <= 1.0e-6) {
-        fragColor = vec4(center, 1.0);
-        return;
+        return center;
     }
     // Screen motion over the shutter, in uv. Soft limit so a fast turn smears instead of tearing.
     vec2 motion = (toUv(cur) - toUv(prev)) * Params.x;
     float len = length(motion);
     motion *= 0.25 / (0.25 + len);
     if (length(motion / Params2.xy) < 0.5) {
-        fragColor = vec4(center, 1.0);
-        return;
+        return center;
     }
 
     // Centred on the pixel, from where it was towards where it is, with a per-pixel offset so the
@@ -99,5 +124,11 @@ void main() {
         sum += texture(Color, suv).rgb;
         weight += 1.0;
     }
-    fragColor = vec4(sum / weight, 1.0);
+    return sum / weight;
+}
+
+void main() {
+    vec2 uv = texCoord;
+    vec3 color = blurred(uv, texture(Color, uv).rgb);
+    fragColor = vec4(crosshair(color, uv), 1.0);
 }

@@ -30,6 +30,8 @@ import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.client.renderer.state.level.PlayerRenderState;
 import net.minecraft.resources.Identifier;
 import org.joml.Matrix4f;
+import org.joml.Vector3f;
+import org.joml.Matrix3f;
 import org.joml.Quaternionf;
 import org.joml.Vector3d;
 import org.joml.Vector4f;
@@ -97,7 +99,11 @@ public final class FrameGenerator {
     private GpuTexture blurTex;
     private GpuTextureView blurView;
     private GpuBuffer blurUbo;
-    private static final int BLUR_UBO_SIZE = 3 * 64 + 2 * 16;
+    private static final int BLUR_UBO_SIZE = 3 * 64 + 9 * 16;
+    // The F3 crosshair, taken from the latest real frame's 3D HUD (drawn by motionblur.fsh).
+    private boolean crosshairOn;
+    private float crosshairFov = 70f;
+    private int crosshairGuiScale = 1;
     private final Map<GpuFormat, RenderPipeline> blurPipelines = new HashMap<>();
     private final Vector3d prevShownPos = new Vector3d();
     private final Matrix4f prevShownViewRot = new Matrix4f();
@@ -609,7 +615,8 @@ public final class FrameGenerator {
         prevShownProj.set(proj);
         prevShownValid = true;
         // A teleport or respawn is not motion.
-        if (!cfg.motionBlur || !hadPrev || src == null || blurView == null || jump > cfg.maxCameraJumpBlocks) return color;
+        boolean blur = cfg.motionBlur && hadPrev && jump <= cfg.maxCameraJumpBlocks;
+        if ((!blur && !crosshairOn) || src == null || blurView == null) return color;
 
         GpuDevice device = RenderSystem.getDevice();
         boolean zeroToOne = device.getDeviceInfo().isZZeroToOne();
@@ -620,11 +627,12 @@ public final class FrameGenerator {
         Matrix4f curViewProj = new Matrix4f(proj).mul(viewRot).translate(
                 (float) (src.pos.x - pos.x), (float) (src.pos.y - pos.y), (float) (src.pos.z - pos.z));
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            ByteBuffer data = Std140Builder.onStack(stack, BLUR_UBO_SIZE)
+            Std140Builder ub = Std140Builder.onStack(stack, BLUR_UBO_SIZE)
                     .putMat4f(srcInvViewProj).putMat4f(curViewProj).putMat4f(prevViewProj)
-                    .putVec4(cfg.motionBlurStrength, reversedZ ? 1f : 0f, zeroToOne ? 1f : 0f, cfg.guiDiffThreshold)
-                    .putVec4(1f / width, 1f / height, handBuffer ? 1f : 0f, nearLock ? 1f : 0f)
-                    .get();
+                    .putVec4(blur ? cfg.motionBlurStrength : 0f, reversedZ ? 1f : 0f, zeroToOne ? 1f : 0f, cfg.guiDiffThreshold)
+                    .putVec4(1f / width, 1f / height, handBuffer ? 1f : 0f, nearLock ? 1f : 0f);
+            putCrosshair(ub, viewRot);
+            ByteBuffer data = ub.get();
             encoder.writeToBuffer(blurUbo.slice(), data);
         }
         GpuSampler nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
@@ -640,6 +648,55 @@ public final class FrameGenerator {
             pass.draw(3, 1, 0, 0);
         }
         return blurView;
+    }
+
+    /** Called at the start of each real frame's 3D HUD. */
+    public void crosshairFrameStart() {
+        crosshairOn = false;
+    }
+
+    /** Vanilla is about to draw the F3 crosshair: true when this draws it instead (frame gen on). */
+    public boolean takeCrosshair(float hudFov, int guiScale) {
+        if (!active()) return false;
+        crosshairOn = true;
+        crosshairFov = hudFov;
+        crosshairGuiScale = guiScale;
+        return true;
+    }
+
+    // Vanilla's crosshair: three axes from a point 1 block ahead, 0.01 * GUI scale long, turned by
+    // the camera rotation (its rotateX / rotateY and mirrored scale are the view rotation), seen
+    // through the 3D HUD projection.
+    private static final float[][] CROSSHAIR_AXES = {{1f, 0f, 0f}, {0f, 1f, 0f}, {0f, 0f, 1f}};
+    private static final float[][] CROSSHAIR_COLORS = {{1f, 0f, 0f}, {0f, 1f, 0f}, {0.5f, 0.5f, 1f}};
+
+    private void putCrosshair(Std140Builder ub, Matrix4f viewRot) {
+        if (!crosshairOn) {
+            for (int i = 0; i < 7; i++) ub.putVec4(0f, 0f, 0f, 0f);
+            return;
+        }
+        Matrix4f hudProj = new Matrix4f().perspective((float) Math.toRadians(crosshairFov), (float) width / height, 0.05f, 100f);
+        Matrix3f rot = viewRot.normalize3x3(new Matrix3f());
+        float len = 0.01f * crosshairGuiScale;
+        Vector3f origin = new Vector3f(0f, 0f, -1f);
+        Vector3f[] tips = new Vector3f[3];
+        Integer[] order = {0, 1, 2};
+        for (int i = 0; i < 3; i++) {
+            float[] a = CROSSHAIR_AXES[i];
+            tips[i] = rot.transform(new Vector3f(a[0], a[1], a[2])).mul(len).add(origin);
+        }
+        // Farthest first, so the nearest axis is drawn on top.
+        java.util.Arrays.sort(order, (x, y) -> Float.compare(tips[x].z, tips[y].z));
+        Vector4f o = hudProj.transform(new Vector4f(origin, 1f));
+        ub.putVec4(o.x / o.w * 0.5f + 0.5f, o.y / o.w * 0.5f + 0.5f, 1f, 1f);
+        for (int i : order) {
+            Vector4f c = hudProj.transform(new Vector4f(tips[i], 1f));
+            ub.putVec4(c.x / c.w * 0.5f + 0.5f, c.y / c.w * 0.5f + 0.5f, 0f, 0f);
+        }
+        for (int i : order) {
+            float[] c = CROSSHAIR_COLORS[i];
+            ub.putVec4(c[0], c[1], c[2], 1f);
+        }
     }
 
     private RenderPipeline blurPipeline(GpuFormat format) {
