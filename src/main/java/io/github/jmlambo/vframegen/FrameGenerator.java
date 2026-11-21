@@ -353,24 +353,42 @@ public final class FrameGenerator {
         minSlackMs = Double.MAX_VALUE;
     }
 
-    public int frameLimit(Minecraft mc, int limit) {
-        if (limit < 260 || !active() || !interpolated() || !VFrameGen.config().autoCap) return limit;
-        if (mc.level == null || mc.isPaused()) return limit;
-        // The monitor the window is on (its current mode). The window's "active video mode" is the
-        // fullscreen mode setting and read 60 Hz on a 120 Hz screen.
+    /**
+     * The refresh rate of the monitor the window is on, rounded up to a whole number (179.96 Hz
+     * reads 180), or 60 if unknown. (Its current mode: the window's "active video mode" is the
+     * fullscreen setting and read 60 Hz on a 120 Hz screen.)
+     */
+    public static int detectedRefreshHz(Minecraft mc) {
         float refresh = 0f;
         try {
             refresh = mc.getWindow().findBestMonitor().currentMode().getRefreshRate();
         } catch (RuntimeException ignored) {
         }
-        if (VFrameGen.config().displayHz > 0) refresh = VFrameGen.config().displayHz;
-        if (!(refresh >= 30f)) refresh = 60f;
+        if (!(refresh >= 30f)) return 60;
+        // Up, but not past a rate that is whole up to rounding error (60.0001 stays 60).
+        return (int) Math.ceil(refresh - 0.05f);
+    }
+
+    public int frameLimit(Minecraft mc, int limit) {
+        if (limit < 260 || !active() || !VFrameGen.config().autoCap) return limit;
+        // Fixed multiplier: only interpolation needs the cap. Adaptive caps at the target in both modes.
+        if (!interpolated() && !VFrameGen.config().adaptive) return limit;
+        if (mc.level == null || mc.isPaused()) return limit;
+        float refresh = VFrameGen.config().displayHz > 0 ? VFrameGen.config().displayHz : detectedRefreshHz(mc);
         int m = Math.clamp(VFrameGen.config().multiplier, 2, FrameGenConfig.MAX_MULTIPLIER);
-        int full = Math.max(1, (int) Math.floor(refresh / m));
+        // Adaptive: real frames never beyond the target (frame generation makes up the rest).
+        int full = VFrameGen.config().adaptive ? VFrameGen.config().targetFps
+                : Math.max(1, (int) Math.floor(refresh / m));
         capFloor = Math.min(full, Math.max(20, full / 2));
         // With the present thread no idle time is needed: just never make more frames than the
         // display can show (the extra ones would be dropped unevenly).
-        int cap = presentThreadActive() ? full : Math.max(capFloor, full - capAdjust);
+        // The idle-time adjustment is measured (and recovered) only while interpolated frames are
+        // generated. With adaptive generation at 1 frame per real frame nothing measures it, so
+        // drop it: otherwise a lowered cap could hold the real frame rate below the target forever.
+        if (VFrameGen.config().adaptive && adaptiveMultiplier() <= 1.0 + 1.0e-6) capAdjust = 0;
+        // A screen that stops generation: no frames to make room for (the adjustment is kept for later).
+        boolean screenBlocks = VFrameGen.config().disableWhileScreenOpen && mc.gui.screen() != null;
+        int cap = presentThreadActive() || !interpolated() || screenBlocks ? full : Math.max(capFloor, full - capAdjust);
         if (cap != lastAutoCap) {
             lastAutoCap = cap;
             if (VFrameGen.config().debugPacingLog) VFrameGen.LOGGER.info("Auto frame cap: {} real fps ({} Hz display / {}x, minus {} so generated frames fit)", cap, refresh, m, capAdjust);
@@ -569,7 +587,8 @@ public final class FrameGenerator {
                 genPlanned = true;
                 genStartNs = 0;
                 nextFrame = 1;
-                frames = Math.clamp(VFrameGen.config().multiplier, 2, FrameGenConfig.MAX_MULTIPLIER);
+                frames = framesPerReal(finished.extractNs - b.extractNs);
+                if (frames < 2) genPlanned = false; // the real frames already reach the target
                 return b.finalView;
             }
             endCapture(null);
@@ -587,6 +606,41 @@ public final class FrameGenerator {
             present = Present.VANILLA;
             return vanillaView;
         }
+    }
+
+    // Adaptive mode: frames shown per real frame, the smoothed time between real frames, and the
+    // fraction of a frame carried over to the next pair.
+    private int adaptiveFrames = 2;
+    private double adaptiveIntervalNs;
+    private double adaptiveCarry;
+
+    /**
+     * Frames shown per real frame (1 = none generated) for a real frame that took intervalNs: the
+     * multiplier, or in adaptive mode what reaches the target frame rate. That is rarely a whole
+     * number (3.3x, say), so each pair of real frames gets the whole part and the remainder is
+     * carried over: 3, 3, 4, 3, ... averages exactly 3.3, and the frame rate shown is the target
+     * instead of the next whole multiple above it.
+     */
+    private int framesPerReal(long intervalNs) {
+        FrameGenConfig cfg = VFrameGen.config();
+        if (!cfg.adaptive) return Math.clamp(cfg.multiplier, 2, FrameGenConfig.MAX_MULTIPLIER);
+        if (intervalNs > 0 && intervalNs < 250_000_000L) {
+            adaptiveIntervalNs = adaptiveIntervalNs <= 0 ? intervalNs
+                    : adaptiveIntervalNs + (intervalNs - adaptiveIntervalNs) * 0.1;
+        }
+        if (adaptiveIntervalNs <= 0) return adaptiveFrames;
+        double ideal = Math.clamp(cfg.targetFps * adaptiveIntervalNs / 1e9, 1.0, FrameGenConfig.MAX_MULTIPLIER);
+        adaptiveCarry += ideal;
+        adaptiveFrames = (int) Math.clamp(Math.floor(adaptiveCarry + 1.0e-6), 1, FrameGenConfig.MAX_MULTIPLIER);
+        adaptiveCarry = Math.clamp(adaptiveCarry - adaptiveFrames, 0.0, 1.0);
+        return adaptiveFrames;
+    }
+
+    /** Frames per real frame adaptive mode is averaging now (for the F3 screen and the stats). */
+    public double adaptiveMultiplier() {
+        FrameGenConfig cfg = VFrameGen.config();
+        if (!cfg.adaptive || adaptiveIntervalNs <= 0) return 0;
+        return Math.clamp(cfg.targetFps * adaptiveIntervalNs / 1e9, 1.0, FrameGenConfig.MAX_MULTIPLIER);
     }
 
     /** True while a generated frame is being submitted (see VulkanTransientMemoryMixin). */
@@ -733,7 +787,8 @@ public final class FrameGenerator {
         if (cfg.maxCameraTurnDegrees > 0 && turnDeg > cfg.maxCameraTurnDegrees) { skip("turn"); return; }
 
         currentProjection(gr, state, cam, curProj);
-        int m = Math.clamp(cfg.multiplier, 2, FrameGenConfig.MAX_MULTIPLIER);
+        int m = framesPerReal(loopNs);
+        if (m < 2) { skip("target"); return; }
         long budget = (long) (emaLoopNs * 0.5);
         capture = DebugCapture.begin();
         if (capture) {

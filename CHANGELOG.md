@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Adaptive frame generation: a toggle and a target frame rate; frames per real frame (1 to 6)
+  follow the real frame rate to reach the target.
+
 ## 0.1.0-alpha.2
 
 - Much higher real frame rate at 3x and above with the present thread: the swapchain now has
