@@ -374,7 +374,10 @@ public final class FrameGenerator {
         capFloor = Math.min(full, Math.max(20, full / 2));
         // With the present thread no idle time is needed: just never make more frames than the
         // display can show (the extra ones would be dropped unevenly).
-        // The idle-time adjustment is measured and recovered by interpolation only.
+        // The idle-time adjustment is measured (and recovered) only while interpolated frames are
+        // generated. With adaptive generation at 1 frame per real frame nothing measures it, so
+        // drop it: otherwise a lowered cap could hold the real frame rate below the target forever.
+        if (VFrameGen.config().adaptive && adaptiveFrames < 2) capAdjust = 0;
         int cap = presentThreadActive() || !interpolated() ? full : Math.max(capFloor, full - capAdjust);
         if (cap != lastAutoCap) {
             lastAutoCap = cap;
