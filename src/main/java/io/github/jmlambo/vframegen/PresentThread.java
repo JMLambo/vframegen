@@ -118,7 +118,8 @@ public final class PresentThread {
         acquiringGenerated = generated;
     }
 
-    private static boolean generatedQueued() {
+    /** Whether a generated frame is queued or being presented. */
+    public static boolean generatedQueued() {
         synchronized (signal) {
             if (busy && busyKind == Kind.GENERATED) return true;
             for (Job job : jobs) {
@@ -128,11 +129,15 @@ public final class PresentThread {
         }
     }
 
-    /** A swapchain acquire (real or generated frame) waited this long (render thread). */
-    public static void noteAcquireWait(long waitedNs) {
+    /**
+     * A swapchain acquire (real or generated frame) waited this long (render thread).
+     * generatedQueuedAtStart: whether generated frames were queued when the acquire began (they may
+     * all have been presented by the time it returns).
+     */
+    public static void noteAcquireWait(long waitedNs, boolean generatedQueuedAtStart) {
         if (acquiringGenerated) {
             if (waitedNs <= GENERATED_WAIT_NS) return;
-        } else if (waitedNs <= REAL_WAIT_NS || !generatedQueued()) {
+        } else if (waitedNs <= REAL_WAIT_NS || !generatedQueuedAtStart) {
             return;
         }
         lastAcquireWaitNs = System.nanoTime();

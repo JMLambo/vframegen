@@ -44,6 +44,7 @@ public abstract class VulkanSurfaceMixin {
         // The swapchain may not be used by two threads at once, and an acquire can wait for the
         // present thread to give an image back: poll without waiting while holding the lock.
         long start = System.nanoTime();
+        boolean generatedQueued = PresentThread.enabled() && PresentThread.generatedQueued();
         long end = start + timeout;
         while (true) {
             int result;
@@ -54,7 +55,7 @@ public abstract class VulkanSurfaceMixin {
                 PresentThread.LOCK.unlock();
             }
             if (result != 1 /* VK_NOT_READY */ && result != 2 /* VK_TIMEOUT */) {
-                if (PresentThread.enabled()) PresentThread.noteAcquireWait(System.nanoTime() - start);
+                if (PresentThread.enabled()) PresentThread.noteAcquireWait(System.nanoTime() - start, generatedQueued);
                 return result;
             }
             if (System.nanoTime() >= end) return 2;
