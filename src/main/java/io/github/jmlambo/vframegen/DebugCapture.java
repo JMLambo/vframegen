@@ -111,23 +111,33 @@ public final class DebugCapture {
     private static void save(Path dir, GpuTexture texture, String name) {
         if (dir == null) return;
         GpuFormat format = texture.getFormat();
-        if (format != GpuFormat.RGBA8_UNORM) {
-            VFrameGen.LOGGER.warn("Cannot save {}: format {} is not RGBA8", name, format);
+        // 8-bit, or half float (some setups render the main target in RGBA16F): clamped to 0..1.
+        boolean half = format == GpuFormat.RGBA16_FLOAT;
+        if (format != GpuFormat.RGBA8_UNORM && !half) {
+            VFrameGen.LOGGER.warn("Cannot save {}: format {} is not RGBA8 or RGBA16F", name, format);
             return;
         }
         int w = texture.getWidth(0);
         int h = texture.getHeight(0);
+        int bpp = half ? 8 : 4;
         Path file = dir.resolve(name + ".png");
         GpuBuffer buffer = RenderSystem.getDevice().createBuffer(() -> "VFrameGen capture " + name,
-                GpuBuffer.USAGE_MAP_READ | GpuBuffer.USAGE_COPY_DST, (long) w * h * 4);
+                GpuBuffer.USAGE_MAP_READ | GpuBuffer.USAGE_COPY_DST, (long) w * h * bpp);
         RenderSystem.getDevice().createCommandEncoder().copyTextureToBuffer(texture, buffer, 0, () -> {
             try (GpuBufferSlice.MappedView view = buffer.map(true, false);
                  NativeImage image = new NativeImage(w, h, false)) {
                 ByteBuffer data = view.data().order(ByteOrder.LITTLE_ENDIAN);
                 for (int y = 0; y < h; y++) {
                     for (int x = 0; x < w; x++) {
-                        // RGBA bytes read little-endian are ABGR; force opaque.
-                        int abgr = data.getInt((y * w + x) * 4) | 0xFF000000;
+                        int abgr;
+                        if (half) {
+                            int o = (y * w + x) * 8;
+                            int r = unit(data.getShort(o)), g = unit(data.getShort(o + 2)), b = unit(data.getShort(o + 4));
+                            abgr = 0xFF000000 | (b << 16) | (g << 8) | r;
+                        } else {
+                            // RGBA bytes read little-endian are ABGR; force opaque.
+                            abgr = data.getInt((y * w + x) * 4) | 0xFF000000;
+                        }
                         image.setPixelABGR(x, y, abgr);
                     }
                 }
@@ -138,5 +148,11 @@ public final class DebugCapture {
                 buffer.close();
             }
         }, 0);
+    }
+
+    /** A half float, clamped to 0..1, as a byte. */
+    private static int unit(short half) {
+        float v = Float.float16ToFloat(half);
+        return v > 0f ? Math.min(255, Math.round(Math.min(v, 1f) * 255f)) : 0;
     }
 }
