@@ -1,6 +1,10 @@
 package io.github.jmlambo.vframegen.mixin;
 
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import com.mojang.renderpearl.api.textures.GpuTextureView;
+import net.minecraft.client.renderer.DebugCrosshairRenderer;
 import io.github.jmlambo.vframegen.FrameGenerator;
 import io.github.jmlambo.vframegen.RenderScale;
 import net.minecraft.client.renderer.state.WindowRenderState;
@@ -29,6 +33,18 @@ public abstract class GameRendererMixin {
     @Inject(method = "render3dHud", at = @At("HEAD"), require = 0)
     private void vframegen$beforeHud3d(CallbackInfo ci) {
         FrameGenerator.INSTANCE.captureWorldDepth((GameRenderer) (Object) this);
+        FrameGenerator.INSTANCE.crosshairFrameStart();
+    }
+
+    // The F3 crosshair turns with the camera: with frame generation on, it is drawn on every shown
+    // frame instead (motionblur.fsh), so generated frames don't show the real frame's copy.
+    @WrapOperation(method = "render3dHud", require = 0, at = @At(value = "INVOKE",
+            target = "Lnet/minecraft/client/renderer/DebugCrosshairRenderer;render(Lnet/minecraft/client/renderer/state/level/CameraRenderState;ILcom/mojang/renderpearl/api/textures/GpuTextureView;Lcom/mojang/renderpearl/api/textures/GpuTextureView;)V"))
+    private void vframegen$crosshair(DebugCrosshairRenderer renderer, CameraRenderState camera, int guiScale,
+                                     GpuTextureView color, GpuTextureView depth, Operation<Void> original) {
+        if (!FrameGenerator.INSTANCE.takeCrosshair(camera.hudFov, guiScale)) {
+            original.call(renderer, camera, guiScale, color, depth);
+        }
     }
 
     // renderItemInHand only submits the hand; it is drawn by the feature dispatcher later in
