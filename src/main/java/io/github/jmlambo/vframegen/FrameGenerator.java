@@ -378,7 +378,9 @@ public final class FrameGenerator {
         // generated. With adaptive generation at 1 frame per real frame nothing measures it, so
         // drop it: otherwise a lowered cap could hold the real frame rate below the target forever.
         if (VFrameGen.config().adaptive && adaptiveFrames < 2) capAdjust = 0;
-        int cap = presentThreadActive() || !interpolated() ? full : Math.max(capFloor, full - capAdjust);
+        // A screen that stops generation: no frames to make room for (the adjustment is kept for later).
+        boolean screenBlocks = VFrameGen.config().disableWhileScreenOpen && mc.gui.screen() != null;
+        int cap = presentThreadActive() || !interpolated() || screenBlocks ? full : Math.max(capFloor, full - capAdjust);
         if (cap != lastAutoCap) {
             lastAutoCap = cap;
             if (VFrameGen.config().debugPacingLog) VFrameGen.LOGGER.info("Auto frame cap: {} real fps ({} Hz display / {}x, minus {} so generated frames fit)", cap, refresh, m, capAdjust);
