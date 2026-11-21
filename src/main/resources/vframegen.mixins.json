@@ -10,6 +10,7 @@
     "GlTransientMemoryMixin",
     "MinecraftAccessor",
     "MinecraftMixin",
+    "RenderSystemAccessor",
     "RenderTargetAccessor",
     "VulkanCommandEncoderMixin",
     "VulkanQueueIdleMixin",

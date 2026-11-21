@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- With render scale below 1.0, the log no longer fills with "Couldn't preload shader vframegen:…"
+  errors during startup: the upscaler now waits until the game has loaded mod shaders.
+
 ## 0.1.0-alpha.6
 
 - VSync is turned off while frame generation is on: it made generated frames stutter heavily
