@@ -90,21 +90,33 @@ public final class PresentThread {
     private static volatile int imageCount;
 
     // Images the presentation engine may still hold after their present returned, beyond the one
-    // on screen. Vulkan has no portable signal for when it releases one, so this starts at 0 and
-    // grows (up to 2) whenever a generated frame's acquire still had to wait.
+    // on screen. Vulkan has no portable signal for when it releases one, so this starts at 0, grows
+    // whenever a generated frame's acquire still had to wait, and shrinks again after a long run
+    // of acquires that did not. It never grows so far that a generated frame cannot be made with
+    // nothing queued, so there are always acquires to learn from.
     private static volatile int engineHeld;
+    private static int acquiresWithoutWait;
 
     public static void setImageCount(int count) {
         imageCount = count;
         engineHeld = 0;
+        acquiresWithoutWait = 0;
     }
 
-    /** A generated frame's acquire waited this long: if it really waited, reserve one more image. */
+    /** A generated frame's acquire waited this long (render thread). */
     public static void noteGeneratedAcquire(long waitedNs) {
-        if (waitedNs > 1_000_000L && engineHeld < 2) {
-            engineHeld++;
-            VFrameGen.LOGGER.info("Present thread: keeping {} more swapchain image(s) free (acquire waited {} ms)",
-                    engineHeld, String.format(java.util.Locale.ROOT, "%.1f", waitedNs / 1e6));
+        // With nothing queued: 1 on screen + engineHeld + this frame + 1 for the next real frame.
+        int most = Math.min(2, Math.max(0, imageCount - 3));
+        if (waitedNs > 1_000_000L) {
+            acquiresWithoutWait = 0;
+            if (engineHeld < most) {
+                engineHeld++;
+                VFrameGen.LOGGER.info("Present thread: keeping {} more swapchain image(s) free (acquire waited {} ms)",
+                        engineHeld, String.format(java.util.Locale.ROOT, "%.1f", waitedNs / 1e6));
+            }
+        } else if (engineHeld > 0 && ++acquiresWithoutWait >= 600) {
+            acquiresWithoutWait = 0;
+            engineHeld--;
         }
     }
 
