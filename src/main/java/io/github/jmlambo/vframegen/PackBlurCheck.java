@@ -8,7 +8,9 @@ import java.io.IOException;
 import java.io.Reader;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Properties;
 
 /**
@@ -25,7 +27,9 @@ public final class PackBlurCheck {
     private static final SystemToast.SystemToastId TOAST = new SystemToast.SystemToastId(12000L);
     private static final long CHECK_EVERY_NS = 2_000_000_000L;
     private static long nextCheckNs;
-    private static String warnedFor = "";
+    // Per pack: the settings file time it was warned for, so switching packs back and forth with
+    // nothing changed does not warn again.
+    private static final Map<String, Long> warned = new HashMap<>();
 
     private PackBlurCheck() {
     }
@@ -40,16 +44,17 @@ public final class PackBlurCheck {
         String pack = read(game.resolve("config/iris.properties")).getProperty("shaderPack", "");
         if (pack.isEmpty()) return;
         Path settings = game.resolve("shaderpacks").resolve(pack + ".txt");
-        String key;
+        long modified;
         try {
-            key = pack + "@" + (Files.exists(settings) ? Files.getLastModifiedTime(settings).toMillis() : 0);
+            modified = Files.exists(settings) ? Files.getLastModifiedTime(settings).toMillis() : 0;
         } catch (IOException | RuntimeException e) {
             return;
         }
-        if (key.equals(warnedFor)) return;
+        Long seen = warned.get(pack);
+        if (seen != null && seen == modified) return;
         String option = blurOption(read(settings));
         if (option == null) return;
-        warnedFor = key;
+        warned.put(pack, modified);
         VFrameGen.LOGGER.info("Shader pack {} has motion blur on ({}); it ghosts with frame generation", pack, option);
         SystemToast.addOrUpdate(mc.gui.toastManager(), TOAST,
                 Component.translatable("vframegen.packBlur.title"),

@@ -627,11 +627,11 @@ public final class FrameGenerator {
                     .get();
             encoder.writeToBuffer(blurUbo.slice(), data);
         }
-        GpuSampler linear = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);
         GpuSampler nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
         try (RenderPass pass = encoder.createRenderPass(() -> "VFrameGen motion blur", blurView, Optional.empty())) {
             pass.setPipeline(RenderSystem.getCompiledPipeline(blurPipeline(colorFormat)));
-            pass.setUniform("Color", color, linear);
+            // Nearest, like the GUI / hand tests: a filtered tap next to the GUI would blend it in.
+            pass.setUniform("Color", color, nearest);
             pass.setUniform("World", src.worldView, nearest);
             pass.setUniform("Final", src.finalView, nearest);
             pass.setUniform("Depth", src.depthView, nearest);
