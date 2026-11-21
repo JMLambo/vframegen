@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- No more oval of moving world in a still frame with shaders off: vanilla's vignette (drawn with the
+  GUI) was taken for GUI and kept unwarped. With frame generation on it is now drawn on every shown
+  frame, under the GUI.
+
 ## 0.1.0-alpha.7
 
 - The F3 crosshair (axis gizmo) no longer trails while turning: with frame generation on it is drawn
