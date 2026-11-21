@@ -73,5 +73,9 @@
   "vframegen.config.autoCap": "Auto frame cap",
   "vframegen.config.autoCap.tooltip": "When Max Framerate is unlimited, caps real frames at your display's refresh rate divided by the multiplier while frame generation runs. Generated frames are shown in the idle time this leaves, so they stay evenly spaced.",
   "vframegen.controller.capture.description": "Save the next burst of real and generated frames to vframegen-debug (same as F8).",
-  "vframegen.controller.toggle.description": "Turn frame generation on or off (same as F9)."
+  "vframegen.controller.toggle.description": "Turn frame generation on or off (same as F9).",
+  "vframegen.vsync.title": "Keep VSync on with frame generation?",
+  "vframegen.vsync.message": "VSync makes frame generation stutter heavily: generated frames get shown twice or dropped. Frame generation already paces frames by itself, so VSync is normally best left off.",
+  "vframegen.vsync.enable": "Keep VSync on",
+  "vframegen.vsync.keepOff": "Turn it off"
 }

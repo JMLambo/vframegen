@@ -277,6 +277,7 @@ public final class FrameGenerator {
     /** Start of a game loop (vanilla has acquired this loop's swapchain image). */
     public void loopStart(Minecraft mc) {
         StallProbe.loopStart();
+        VsyncGuard.enforce(mc);
         frameProjCaptured = false;
         frameWorldDepthCaptured = false;
         frameHandCaptured = false;

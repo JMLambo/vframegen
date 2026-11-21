@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- VSync is turned off while frame generation is on: it made generated frames stutter heavily
+  (seen on a tester's Windows PC). Turning it back on in any settings screen (vanilla, Sodium and
+  others) shows a prompt after leaving that screen, to keep it on or turn it off.
+- Tested on Windows: GTX 1060 3 GB, i7-7700, 8 GB RAM (vanilla renderer, Vulkan).
+
 ## 0.1.0-alpha.5
 
 - The swapchain image reserve grows for a generated frame's acquire only past 3 ms (was 1 ms), so
