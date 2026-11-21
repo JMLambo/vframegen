@@ -1346,11 +1346,14 @@ public final class FrameGenerator {
                     statsSkips.merge("no-image", frames - k, Integer::sum);
                     break;
                 }
+                PresentThread.setAcquiringGenerated(true);
                 try {
                     surface.acquireNextTexture();
                 } catch (SurfaceException e) {
                     recreateSurface(mc);
                     return;
+                } finally {
+                    PresentThread.setAcquiringGenerated(false);
                 }
                 StallProbe.mark("gen acquire");
                 nextFrame = k;

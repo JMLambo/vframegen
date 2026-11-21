@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- The swapchain image reserve grows for a generated frame's acquire only past 3 ms (was 1 ms), so
+  ordinary 1–2 ms waits no longer make it grow and shrink every few seconds. A real frame's wait
+  still counts from 1 ms, while generated frames are queued.
+
 ## 0.1.0-alpha.4
 
 - Generated frames no longer hold real frames back: when the estimated number of free swapchain
