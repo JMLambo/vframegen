@@ -89,14 +89,29 @@ public final class PresentThread {
     // Images in the swapchain (set when it is configured).
     private static volatile int imageCount;
 
+    // Images the presentation engine may still hold after their present returned, beyond the one
+    // on screen. Vulkan has no portable signal for when it releases one, so this starts at 0 and
+    // grows (up to 2) whenever a generated frame's acquire still had to wait.
+    private static volatile int engineHeld;
+
     public static void setImageCount(int count) {
         imageCount = count;
+        engineHeld = 0;
+    }
+
+    /** A generated frame's acquire waited this long: if it really waited, reserve one more image. */
+    public static void noteGeneratedAcquire(long waitedNs) {
+        if (waitedNs > 1_000_000L && engineHeld < 2) {
+            engineHeld++;
+            VFrameGen.LOGGER.info("Present thread: keeping {} more swapchain image(s) free (acquire waited {} ms)",
+                    engineHeld, String.format(java.util.Locale.ROOT, "%.1f", waitedNs / 1e6));
+        }
     }
 
     /**
      * Whether a generated frame can get a swapchain image without waiting: one image is on screen,
-     * every present still queued here holds one, and one is kept free so the next real frame never
-     * waits either. Without this the render thread blocked in acquire whenever many generated
+     * every present still queued here holds one, the presentation engine may hold a few more (see
+     * engineHeld), and one is kept free so the next real frame never waits either. Without this the render thread blocked in acquire whenever many generated
      * frames were queued (6x at a low real frame rate), and frame generation lowered the real
      * frame rate by half.
      */
@@ -107,7 +122,7 @@ public final class PresentThread {
         synchronized (signal) {
             held = jobs.size() + (busy ? 1 : 0);
         }
-        return held + 1 + 2 <= count;
+        return held + 1 + engineHeld + 2 <= count;
     }
 
     /** True once if a deferred present found the swapchain out of date: vanilla reconfigures it. */
