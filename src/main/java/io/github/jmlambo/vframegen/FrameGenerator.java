@@ -385,7 +385,7 @@ public final class FrameGenerator {
         // The idle-time adjustment is measured (and recovered) only while interpolated frames are
         // generated. With adaptive generation at 1 frame per real frame nothing measures it, so
         // drop it: otherwise a lowered cap could hold the real frame rate below the target forever.
-        if (VFrameGen.config().adaptive && adaptiveFrames < 2) capAdjust = 0;
+        if (VFrameGen.config().adaptive && adaptiveMultiplier() <= 1.0 + 1.0e-6) capAdjust = 0;
         // A screen that stops generation: no frames to make room for (the adjustment is kept for later).
         boolean screenBlocks = VFrameGen.config().disableWhileScreenOpen && mc.gui.screen() != null;
         int cap = presentThreadActive() || !interpolated() || screenBlocks ? full : Math.max(capFloor, full - capAdjust);
@@ -608,14 +608,18 @@ public final class FrameGenerator {
         }
     }
 
-    // Adaptive mode: frames shown per real frame, and the smoothed time between real frames.
+    // Adaptive mode: frames shown per real frame, the smoothed time between real frames, and the
+    // fraction of a frame carried over to the next pair.
     private int adaptiveFrames = 2;
     private double adaptiveIntervalNs;
+    private double adaptiveCarry;
 
     /**
      * Frames shown per real frame (1 = none generated) for a real frame that took intervalNs: the
-     * multiplier, or in adaptive mode what reaches the target frame rate. That changes only when
-     * the ideal count is clearly past the next whole number, so it does not flip every frame.
+     * multiplier, or in adaptive mode what reaches the target frame rate. That is rarely a whole
+     * number (3.3x, say), so each pair of real frames gets the whole part and the remainder is
+     * carried over: 3, 3, 4, 3, ... averages exactly 3.3, and the frame rate shown is the target
+     * instead of the next whole multiple above it.
      */
     private int framesPerReal(long intervalNs) {
         FrameGenConfig cfg = VFrameGen.config();
@@ -625,11 +629,18 @@ public final class FrameGenerator {
                     : adaptiveIntervalNs + (intervalNs - adaptiveIntervalNs) * 0.1;
         }
         if (adaptiveIntervalNs <= 0) return adaptiveFrames;
-        double ideal = cfg.targetFps * adaptiveIntervalNs / 1e9;
-        if (Math.abs(ideal - adaptiveFrames) > 0.6) {
-            adaptiveFrames = (int) Math.clamp(Math.round(ideal), 1, FrameGenConfig.MAX_MULTIPLIER);
-        }
+        double ideal = Math.clamp(cfg.targetFps * adaptiveIntervalNs / 1e9, 1.0, FrameGenConfig.MAX_MULTIPLIER);
+        adaptiveCarry += ideal;
+        adaptiveFrames = (int) Math.clamp(Math.floor(adaptiveCarry + 1.0e-6), 1, FrameGenConfig.MAX_MULTIPLIER);
+        adaptiveCarry = Math.clamp(adaptiveCarry - adaptiveFrames, 0.0, 1.0);
         return adaptiveFrames;
+    }
+
+    /** Frames per real frame adaptive mode is averaging now (for the F3 screen and the stats). */
+    public double adaptiveMultiplier() {
+        FrameGenConfig cfg = VFrameGen.config();
+        if (!cfg.adaptive || adaptiveIntervalNs <= 0) return 0;
+        return Math.clamp(cfg.targetFps * adaptiveIntervalNs / 1e9, 1.0, FrameGenConfig.MAX_MULTIPLIER);
     }
 
     /** True while a generated frame is being submitted (see VulkanTransientMemoryMixin). */
