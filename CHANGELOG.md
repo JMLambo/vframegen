@@ -1,11 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.1.0-alpha.3
 
-- Adaptive frame generation: a toggle and a target frame rate; frames per real frame (1 to 6,
-  fractional on average) follow the real frame rate to reach the target.
+- Adaptive frame generation: a toggle and a target frame rate (up to 250 fps). Frames per real
+  frame (1 to 6, fractional on average, like 3.3x) follow the real frame rate to reach the target,
+  and real frames are capped at it. F3 shows the current multiplier.
 - New upscaler option for render scale: Edge-adaptive (FSR 1 style EASU + RCAS), next to the
   existing Bicubic.
+- Settings: the multiplier is greyed out while adaptive is on, and the target while it is off.
+  Display refresh rate starts at the monitor's detected rate, rounded up (179.96 Hz reads 180),
+  and the auto cap uses that rounded rate.
 
 ## 0.1.0-alpha.2
 
