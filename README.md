@@ -60,6 +60,11 @@ between the one on screen (A) and the held one (B) are built from both, then B i
    offset, so view bobbing stays smooth.
 4. The held item and the GUI are not warped. They come from the frame nearer in time.
 
+**Adaptive frame generation** (off by default). Instead of a fixed multiplier, VFrameGen picks
+how many frames to show per real frame (1 to 6) so that real and generated frames together reach a
+target frame rate. When the real frame rate drops, more frames are generated; when the real frames
+reach the target alone, none are. Real frames are capped at the target.
+
 **Low-latency mode.** Nothing is held. The last real frame is warped toward the camera of the
 frame about to render. This has less delay but is less accurate.
 
@@ -107,7 +112,8 @@ window size. The image is then upscaled, and the GUI stays at full resolution. T
 In game: **Mod Menu → VFrameGen** (needs Cloth Config), or `config/vframegen.properties`.
 Toggle key: **F9** (rebind under Controls → VFrameGen).
 
-- **General**: on/off, mode, multiplier (2–6x), depth mode, pacing, present thread (Vulkan,
+- **General**: on/off, mode, multiplier (2–6x), adaptive frame generation with a target frame
+  rate, depth mode, pacing, present thread (Vulkan,
   needs a restart), auto frame cap, display refresh rate.
 - **Upscaling**: render scale, upscaler (bicubic or edge-adaptive) and sharpening.
 - **Limits**: when not to generate frames (camera jumps, fast turns, very slow real frames).

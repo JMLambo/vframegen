@@ -18,7 +18,9 @@ public abstract class DebugEntryFpsMixin {
     private void vframegen$addSplit(DebugScreenDisplayer displayer, Level level, LevelChunk clientChunk,
                                     LevelChunk serverChunk, CallbackInfo ci) {
         FrameGenerator gen = FrameGenerator.INSTANCE;
-        String state = VFrameGen.config().enabled ? "" : " (off)";
+        double adaptive = gen.adaptiveMultiplier();
+        String state = !VFrameGen.config().enabled ? " (off)"
+                : adaptive > 0 ? String.format(java.util.Locale.ROOT, " (adaptive %.1fx)", adaptive) : "";
         displayer.addPriorityLine("VFrameGen: " + gen.realFps() + " real + " + gen.generatedFps() + " generated" + state);
     }
 }

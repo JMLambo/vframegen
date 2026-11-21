@@ -78,8 +78,7 @@ public abstract class VulkanSurfaceMixin {
     @ModifyExpressionValue(method = "configure", at = @At(value = "INVOKE", target = "Ljava/lang/Math;max(II)I"))
     private int vframegen$moreImages(int count, @Local VkSurfaceCapabilitiesKHR caps) {
         if (!PresentThread.enabled()) return count;
-        int multiplier = Math.clamp(io.github.jmlambo.vframegen.VFrameGen.config().multiplier, 2,
-                io.github.jmlambo.vframegen.FrameGenConfig.MAX_MULTIPLIER);
+        int multiplier = io.github.jmlambo.vframegen.VFrameGen.config().maxFramesPerReal();
         int max = caps.maxImageCount() == 0 ? 16 : caps.maxImageCount();
         return Math.max(count, Math.min(count + multiplier, max));
     }
