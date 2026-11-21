@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0-alpha.6
 
 - VSync is turned off while frame generation is on: it made generated frames stutter heavily
   (seen on a tester's Windows PC). Turning it back on in any settings screen (vanilla, Sodium and
