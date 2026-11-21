@@ -48,6 +48,7 @@ public final class PresentThread {
     private static final Object signal = new Object();
     private static Thread thread;
     private static volatile boolean busy;
+    private static volatile Kind busyKind;
     private static volatile boolean surfaceLost;
 
     // Set by the render thread for the present() it is about to make.
@@ -96,10 +97,15 @@ public final class PresentThread {
     // down). If giving one back was wrong, the next acquire waits and takes it again. It never grows
     // so far that a generated frame cannot be made with nothing queued.
     private static final long RESERVE_RECOVERY_NS = 3_000_000_000L;
-    // A wait that counts as "the engine still held an image". Acquires routinely take 1-2 ms
-    // while the GPU finishes the previous frame; at 1 ms the reserve grew and shrank every few
-    // seconds for that alone.
-    private static final long RESERVE_WAIT_NS = 3_000_000L;
+    // A wait that counts as "the engine still held an image". A generated frame's acquire routinely
+    // takes 1-2 ms while the GPU finishes the previous frame (at 1 ms the reserve grew and shrank
+    // every few seconds for that alone), so it counts from 3 ms. A real frame must not wait for
+    // generated frames at all, so its waits count from 1 ms, but only while generated frames are
+    // queued (otherwise they did not cause it).
+    private static final long GENERATED_WAIT_NS = 3_000_000L;
+    private static final long REAL_WAIT_NS = 1_000_000L;
+    // Set by the render thread around a generated frame's acquire.
+    private static boolean acquiringGenerated;
     private static volatile int engineHeld;
     private static volatile long lastAcquireWaitNs;
 
@@ -108,9 +114,27 @@ public final class PresentThread {
         engineHeld = 0;
     }
 
+    public static void setAcquiringGenerated(boolean generated) {
+        acquiringGenerated = generated;
+    }
+
+    private static boolean generatedQueued() {
+        synchronized (signal) {
+            if (busy && busyKind == Kind.GENERATED) return true;
+            for (Job job : jobs) {
+                if (job.kind == Kind.GENERATED) return true;
+            }
+            return false;
+        }
+    }
+
     /** A swapchain acquire (real or generated frame) waited this long (render thread). */
     public static void noteAcquireWait(long waitedNs) {
-        if (waitedNs <= RESERVE_WAIT_NS) return;
+        if (acquiringGenerated) {
+            if (waitedNs <= GENERATED_WAIT_NS) return;
+        } else if (waitedNs <= REAL_WAIT_NS || !generatedQueued()) {
+            return;
+        }
         lastAcquireWaitNs = System.nanoTime();
         // With nothing queued: 1 on screen + engineHeld + this frame + 1 for the next real frame.
         int most = Math.min(2, Math.max(0, imageCount - 3));
@@ -225,6 +249,7 @@ public final class PresentThread {
                 }
                 job = jobs.pollFirst();
                 busy = true;
+                busyKind = job.kind;
             }
             try {
                 handle(job);
