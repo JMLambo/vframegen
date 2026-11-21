@@ -353,20 +353,28 @@ public final class FrameGenerator {
         minSlackMs = Double.MAX_VALUE;
     }
 
-    public int frameLimit(Minecraft mc, int limit) {
-        if (limit < 260 || !active() || !VFrameGen.config().autoCap) return limit;
-        // Fixed multiplier: only interpolation needs the cap. Adaptive caps at the target in both modes.
-        if (!interpolated() && !VFrameGen.config().adaptive) return limit;
-        if (mc.level == null || mc.isPaused()) return limit;
-        // The monitor the window is on (its current mode). The window's "active video mode" is the
-        // fullscreen mode setting and read 60 Hz on a 120 Hz screen.
+    /**
+     * The refresh rate of the monitor the window is on, rounded up to a whole number (179.96 Hz
+     * reads 180), or 60 if unknown. (Its current mode: the window's "active video mode" is the
+     * fullscreen setting and read 60 Hz on a 120 Hz screen.)
+     */
+    public static int detectedRefreshHz(Minecraft mc) {
         float refresh = 0f;
         try {
             refresh = mc.getWindow().findBestMonitor().currentMode().getRefreshRate();
         } catch (RuntimeException ignored) {
         }
-        if (VFrameGen.config().displayHz > 0) refresh = VFrameGen.config().displayHz;
-        if (!(refresh >= 30f)) refresh = 60f;
+        if (!(refresh >= 30f)) return 60;
+        // Up, but not past a rate that is whole up to rounding error (60.0001 stays 60).
+        return (int) Math.ceil(refresh - 0.05f);
+    }
+
+    public int frameLimit(Minecraft mc, int limit) {
+        if (limit < 260 || !active() || !VFrameGen.config().autoCap) return limit;
+        // Fixed multiplier: only interpolation needs the cap. Adaptive caps at the target in both modes.
+        if (!interpolated() && !VFrameGen.config().adaptive) return limit;
+        if (mc.level == null || mc.isPaused()) return limit;
+        float refresh = VFrameGen.config().displayHz > 0 ? VFrameGen.config().displayHz : detectedRefreshHz(mc);
         int m = Math.clamp(VFrameGen.config().multiplier, 2, FrameGenConfig.MAX_MULTIPLIER);
         // Adaptive: real frames never beyond the target (frame generation makes up the rest).
         int full = VFrameGen.config().adaptive ? VFrameGen.config().targetFps

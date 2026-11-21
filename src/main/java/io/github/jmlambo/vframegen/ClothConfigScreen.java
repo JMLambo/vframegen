@@ -3,6 +3,8 @@ package io.github.jmlambo.vframegen;
 import me.shedaniel.clothconfig2.api.ConfigBuilder;
 import me.shedaniel.clothconfig2.api.ConfigCategory;
 import me.shedaniel.clothconfig2.api.ConfigEntryBuilder;
+import me.shedaniel.clothconfig2.api.Requirement;
+import me.shedaniel.clothconfig2.gui.entries.BooleanListEntry;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
@@ -33,15 +35,19 @@ final class ClothConfigScreen {
         general.addEntry(e.startBooleanToggle(t("enabled"), cfg.enabled)
                 .setDefaultValue(def.enabled).setTooltip(tip("enabled"))
                 .setSaveConsumer(v -> cfg.enabled = v).build());
+        // Built first so the multiplier (fixed) and the target (adaptive) can grey out by it.
+        BooleanListEntry adaptive = e.startBooleanToggle(t("adaptive"), cfg.adaptive)
+                .setDefaultValue(def.adaptive).setTooltip(tip("adaptive"))
+                .setSaveConsumer(v -> cfg.adaptive = v).build();
         general.addEntry(e.startIntSlider(t("multiplier"), cfg.multiplier, 2, FrameGenConfig.MAX_MULTIPLIER)
                 .setDefaultValue(def.multiplier).setTooltip(tip("multiplier"))
                 .setTextGetter(v -> Component.literal(v + "x"))
+                .setRequirement(Requirement.isFalse(adaptive))
                 .setSaveConsumer(v -> cfg.multiplier = v).build());
-        general.addEntry(e.startBooleanToggle(t("adaptive"), cfg.adaptive)
-                .setDefaultValue(def.adaptive).setTooltip(tip("adaptive"))
-                .setSaveConsumer(v -> cfg.adaptive = v).build());
+        general.addEntry(adaptive);
         general.addEntry(e.startIntSlider(t("targetFps"), cfg.targetFps, 30, FrameGenConfig.MAX_TARGET_FPS)
                 .setDefaultValue(def.targetFps).setTooltip(tip("targetFps"))
+                .setRequirement(Requirement.isTrue(adaptive))
                 .setTextGetter(v -> Component.literal(v + " fps"))
                 .setSaveConsumer(v -> cfg.targetFps = v).build());
         general.addEntry(e.startEnumSelector(t("mode"), FrameGenConfig.Mode.class, cfg.mode)
@@ -62,10 +68,15 @@ final class ClothConfigScreen {
         general.addEntry(e.startBooleanToggle(t("autoCap"), cfg.autoCap)
                 .setDefaultValue(def.autoCap).setTooltip(tip("autoCap"))
                 .setSaveConsumer(v -> cfg.autoCap = v).build());
-        general.addEntry(e.startIntSlider(t("displayHz"), cfg.displayHz, 0, 500)
-                .setDefaultValue(def.displayHz).setTooltip(tip("displayHz"))
-                .setTextGetter(v -> v == 0 ? Component.translatable("vframegen.config.displayHz.auto") : Component.literal(v + " Hz"))
-                .setSaveConsumer(v -> cfg.displayHz = v).build());
+        // Starts at the detected refresh rate; left there it stays automatic (0 in the file), so
+        // it follows the window to another monitor.
+        int detectedHz = FrameGenerator.detectedRefreshHz(net.minecraft.client.Minecraft.getInstance());
+        general.addEntry(e.startIntSlider(t("displayHz"), cfg.displayHz > 0 ? cfg.displayHz : detectedHz, 30, 500)
+                .setDefaultValue(detectedHz).setTooltip(tip("displayHz"))
+                .setTextGetter(v -> v == detectedHz
+                        ? Component.translatable("vframegen.config.displayHz.detected", v)
+                        : Component.literal(v + " Hz"))
+                .setSaveConsumer(v -> cfg.displayHz = v == detectedHz ? 0 : v).build());
         general.addEntry(e.startBooleanToggle(t("disableWhileScreenOpen"), cfg.disableWhileScreenOpen)
                 .setDefaultValue(def.disableWhileScreenOpen).setTooltip(tip("disableWhileScreenOpen"))
                 .setSaveConsumer(v -> cfg.disableWhileScreenOpen = v).build());
