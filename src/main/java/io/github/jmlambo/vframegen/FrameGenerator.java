@@ -102,7 +102,12 @@ public final class FrameGenerator {
     private static final int BLUR_UBO_SIZE = 3 * 64 + 10 * 16;
     // Vanilla's vignette, taken from this real frame's GUI (drawn by motionblur.fsh).
     private static final Identifier VIGNETTE = Identifier.withDefaultNamespace("textures/misc/vignette.png");
+    // vignetteOn is what shown frames use; vignetteNext is set while this loop's GUI is extracted,
+    // and becomes vignetteOn when this loop's real frame is shown. Generated frames drawn at the
+    // start of a loop (present thread off) keep the previous real frame's vignette.
     private boolean vignetteOn;
+    private boolean vignetteNext;
+    private int vignetteNextArgb;
     private boolean vignetteLogged;
     private float vignetteR, vignetteG, vignetteB;
     // The F3 crosshair, taken from the latest real frame's 3D HUD (drawn by motionblur.fsh).
@@ -302,8 +307,6 @@ public final class FrameGenerator {
     public void loopStart(Minecraft mc) {
         StallProbe.loopStart();
         VsyncGuard.enforce(mc);
-        // Set again by takeVignette while this loop's GUI is extracted (vignette option on).
-        vignetteOn = false;
         PackBlurCheck.tick(mc);
         frameProjCaptured = false;
         frameWorldDepthCaptured = false;
@@ -582,6 +585,12 @@ public final class FrameGenerator {
             DebugCapture.sequenceFrame(f != null ? f.finalImage : null, "real-direct", f == null ? "vanilla" : String.format(Locale.ROOT,
                     "newest frame directly, pos %.4f %.4f %.4f (held was %s)", f.pos.x, f.pos.y, f.pos.z, heldBefore == null ? "none" : "dropped"));
         }
+        // This loop's GUI has been extracted: its vignette (or none) applies from this real frame on.
+        vignetteOn = vignetteNext;
+        vignetteNext = false;
+        vignetteR = ((vignetteNextArgb >> 16) & 0xFF) / 255f;
+        vignetteG = ((vignetteNextArgb >> 8) & 0xFF) / 255f;
+        vignetteB = (vignetteNextArgb & 0xFF) / 255f;
         return blurReal(shownView, vanillaView);
     }
 
@@ -667,14 +676,12 @@ public final class FrameGenerator {
      */
     public boolean takeVignette(int argb) {
         if (!active()) return false;
-        if (!vignetteOn && !vignetteLogged) {
+        if (!vignetteLogged) {
             vignetteLogged = true;
             VFrameGen.LOGGER.info("Drawing the vignette on every shown frame");
         }
-        vignetteOn = true;
-        vignetteR = ((argb >> 16) & 0xFF) / 255f;
-        vignetteG = ((argb >> 8) & 0xFF) / 255f;
-        vignetteB = (argb & 0xFF) / 255f;
+        vignetteNext = true;
+        vignetteNextArgb = argb;
         return true;
     }
 
