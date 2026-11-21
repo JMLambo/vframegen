@@ -86,6 +86,10 @@ final class ClothConfigScreen {
                 .setDefaultValue((int) Math.round(def.renderScale * 100)).setTooltip(tip("renderScale"))
                 .setTextGetter(v -> Component.literal(v + "%"))
                 .setSaveConsumer(v -> cfg.renderScale = v / 100.0).build());
+        upscaling.addEntry(e.startEnumSelector(t("upscaler"), FrameGenConfig.Upscaler.class, cfg.upscaler)
+                .setDefaultValue(def.upscaler).setTooltip(tip("upscaler"))
+                .setEnumNameProvider(v -> Component.translatable("vframegen.config.upscaler." + v.name().toLowerCase(java.util.Locale.ROOT)))
+                .setSaveConsumer(v -> cfg.upscaler = v).build());
         upscaling.addEntry(e.startIntSlider(t("upscaleSharpness"), (int) Math.round(cfg.upscaleSharpness * 100), 0, 100)
                 .setDefaultValue((int) Math.round(def.upscaleSharpness * 100)).setTooltip(tip("upscaleSharpness"))
                 .setTextGetter(v -> Component.literal(v + "%"))

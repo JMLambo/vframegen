@@ -99,8 +99,13 @@ hand.
 ## Render scale
 
 **Upscaling → Render scale** (50–100%). The world and the shader pack render at a fraction of the
-window size. The image is then upscaled with an edge-aware bicubic filter followed by
-contrast-adaptive sharpening. The GUI stays at full resolution.
+window size. The image is then upscaled, and the GUI stays at full resolution. Two upscalers:
+
+- **Bicubic** (default): Catmull-Rom, clamped so edges don't ring, then contrast-adaptive
+  sharpening. The fastest.
+- **Edge-adaptive (FSR 1)**: a port of AMD FidelityFX Super Resolution 1.0's EASU and RCAS. It
+  estimates each edge's direction and filters along it, so edges stay sharp without jaggies, then
+  sharpens without halos. A little more GPU time.
 
 ## Settings
 
@@ -110,7 +115,7 @@ Toggle key: **F9** (rebind under Controls → VFrameGen).
 - **General**: on/off, mode, multiplier (2–6x), adaptive frame generation with a target frame
   rate, depth mode, pacing, present thread (Vulkan,
   needs a restart), auto frame cap, display refresh rate.
-- **Upscaling**: render scale and sharpening.
+- **Upscaling**: render scale, upscaler (bicubic or edge-adaptive) and sharpening.
 - **Limits**: when not to generate frames (camera jumps, fast turns, very slow real frames).
 - **Quality**: sharpening of generated frames, GUI detection threshold.
 - **Debug** (all off by default): a magenta tint on generated frames, F8 captures (images and
@@ -174,4 +179,5 @@ Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). The edge-adaptive upscaler is based on AMD FidelityFX Super Resolution 1.0
+(MIT, © Advanced Micro Devices, Inc.); its notice is in the shader files.

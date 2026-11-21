@@ -2,8 +2,10 @@
 
 ## Unreleased
 
-- Adaptive frame generation: a toggle and a target frame rate; frames per real frame (1 to 6)
-  follow the real frame rate to reach the target.
+- Adaptive frame generation: a toggle and a target frame rate; frames per real frame (1 to 6,
+  fractional on average) follow the real frame rate to reach the target.
+- New upscaler option for render scale: Edge-adaptive (FSR 1 style EASU + RCAS), next to the
+  existing Bicubic.
 
 ## 0.1.0-alpha.2
 
