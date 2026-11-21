@@ -39,11 +39,14 @@ Requires Java 25, which Minecraft 26.3 already uses.
 |---|---|
 | Minecraft | 26.3, Fabric Loader 0.19.5+ |
 | Backend | Vulkan (present thread). OpenGL builds and runs, but has been tested much less. |
-| GPU / OS | NVIDIA RTX 4050 Laptop, Linux (Fedora, KDE Wayland) |
+| GPU / OS | NVIDIA RTX 4050 Laptop and AMD Radeon 660M (integrated, RADV), Linux (Fedora, KDE Wayland) |
 | Mods | Sodium 0.9.3-beta.4, Iris 1.12 (a local build with Distant Horizons 3.4 support), Distant Horizons 3.4.0-RC2, Controlify 3.5.3, Reflex 1.1.6 |
-| Shader pack | Complementary Unbound r5.10 + Euphoria Patches 1.11.2 |
+| Shader packs | Complementary Unbound r5.10 + Euphoria Patches 1.11.2 (RTX 4050), Mellow 3.5 (Radeon 660M: about 30 real fps on its Fancy preset) |
 
-Reports from other GPUs (AMD, Intel), Windows, and other shader packs are very welcome.
+On integrated graphics, frame generation itself is cheap (about 0.4 ms per generated frame on the
+660M); Distant Horizons is the biggest cost, so set its CPU and Quality presets low.
+
+Reports from other GPUs (Intel, desktop AMD), Windows, and other shader packs are very welcome.
 
 ## How it works
 
@@ -148,7 +151,7 @@ frames.
 - Transparent HUD parts show the world behind them as of the nearer real frame.
 - The GUI is not warped, so HUD elements that turn with the camera (the F3 axis gizmo) only
   update at the real frame rate and trail behind the world while turning.
-- OpenGL, AMD/Intel GPUs and Windows have barely been tested.
+- OpenGL, Intel and desktop AMD GPUs, and Windows have barely been tested.
 
 ## Building
 
