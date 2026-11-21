@@ -2,8 +2,9 @@
 
 ## 0.1.0-alpha.4
 
-- Generated frames never slow down real frames: when no swapchain image is free, the rest of a
-  pair's generated frames are skipped instead of waited for. With a large modpack at a high
+- Generated frames no longer hold real frames back: when no swapchain image is free, the rest of
+  a pair's generated frames are skipped instead of waited for. (A real frame can still wait
+  briefly, once, after the image reserve is given back; the reserve then grows again.) With a large modpack at a high
   adaptive multiplier this doubled the real frame rate (10–16 → 24–35 fps). The swapchain gets
   two pairs' worth of images where the driver allows it.
 - Shader packs: blocks right next to the camera are no longer taken for the held item (only
