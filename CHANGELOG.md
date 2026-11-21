@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- The swapchain image reserve only grows for acquire waits over 3 ms (was 1 ms), so ordinary
+  1–2 ms waits no longer make it grow and shrink every few seconds.
+
 ## 0.1.0-alpha.4
 
 - Generated frames no longer hold real frames back: when the estimated number of free swapchain
