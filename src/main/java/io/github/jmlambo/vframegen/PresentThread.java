@@ -86,6 +86,30 @@ public final class PresentThread {
         timelineValue = value;
     }
 
+    // Images in the swapchain (set when it is configured).
+    private static volatile int imageCount;
+
+    public static void setImageCount(int count) {
+        imageCount = count;
+    }
+
+    /**
+     * Whether a generated frame can get a swapchain image without waiting: one image is on screen,
+     * every present still queued here holds one, and one is kept free so the next real frame never
+     * waits either. Without this the render thread blocked in acquire whenever many generated
+     * frames were queued (6x at a low real frame rate), and frame generation lowered the real
+     * frame rate by half.
+     */
+    public static boolean imageFree() {
+        int count = imageCount;
+        if (count <= 0) return true;
+        int held;
+        synchronized (signal) {
+            held = jobs.size() + (busy ? 1 : 0);
+        }
+        return held + 1 + 2 <= count;
+    }
+
     /** True once if a deferred present found the swapchain out of date: vanilla reconfigures it. */
     public static boolean takeSurfaceLost() {
         boolean lost = surfaceLost;

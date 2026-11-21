@@ -80,6 +80,12 @@ public abstract class VulkanSurfaceMixin {
         if (!PresentThread.enabled()) return count;
         int multiplier = io.github.jmlambo.vframegen.VFrameGen.config().maxFramesPerReal();
         int max = caps.maxImageCount() == 0 ? 16 : caps.maxImageCount();
-        return Math.max(count, Math.min(count + multiplier, max));
+        // Two pairs of real and generated frames: the render thread makes the next pair while the
+        // present thread is still showing the last one.
+        int images = Math.max(count, Math.min(count + 2 * multiplier, max));
+        PresentThread.setImageCount(images);
+        io.github.jmlambo.vframegen.VFrameGen.LOGGER.info("Swapchain images: {} (driver allows {} to {})", images,
+                caps.minImageCount(), caps.maxImageCount() == 0 ? "any" : caps.maxImageCount());
+        return images;
     }
 }
