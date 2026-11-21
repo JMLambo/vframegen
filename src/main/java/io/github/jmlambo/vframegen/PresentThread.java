@@ -86,6 +86,60 @@ public final class PresentThread {
         timelineValue = value;
     }
 
+    // Images in the swapchain (set when it is configured).
+    private static volatile int imageCount;
+
+    // Images the presentation engine may still hold after their present returned, beyond the one
+    // on screen. Vulkan has no portable signal for when it releases one, so this starts at 0, grows
+    // whenever any acquire (real or generated) had to wait, and gives one image back after a few
+    // seconds without one (checked on every attempt, so it recovers even when attempts are turned
+    // down). If giving one back was wrong, the next acquire waits and takes it again. It never grows
+    // so far that a generated frame cannot be made with nothing queued.
+    private static final long RESERVE_RECOVERY_NS = 3_000_000_000L;
+    private static volatile int engineHeld;
+    private static volatile long lastAcquireWaitNs;
+
+    public static void setImageCount(int count) {
+        imageCount = count;
+        engineHeld = 0;
+    }
+
+    /** A swapchain acquire (real or generated frame) waited this long (render thread). */
+    public static void noteAcquireWait(long waitedNs) {
+        if (waitedNs <= 1_000_000L) return;
+        lastAcquireWaitNs = System.nanoTime();
+        // With nothing queued: 1 on screen + engineHeld + this frame + 1 for the next real frame.
+        int most = Math.min(2, Math.max(0, imageCount - 3));
+        if (engineHeld < most) {
+            engineHeld++;
+            if (VFrameGen.config().debugPacingLog) {
+                VFrameGen.LOGGER.info("Present thread: keeping {} more swapchain image(s) free (acquire waited {} ms)",
+                        engineHeld, String.format(java.util.Locale.ROOT, "%.1f", waitedNs / 1e6));
+            }
+        }
+    }
+
+    /**
+     * Whether a generated frame can get a swapchain image without waiting: one image is on screen,
+     * every present still queued here holds one, the presentation engine may hold a few more (see
+     * engineHeld), and one is kept free so the next real frame never waits either. Without this the render thread blocked in acquire whenever many generated
+     * frames were queued (6x at a low real frame rate), and frame generation lowered the real
+     * frame rate by half.
+     */
+    public static boolean imageFree() {
+        int count = imageCount;
+        if (count <= 0) return true;
+        if (engineHeld > 0 && System.nanoTime() - lastAcquireWaitNs > RESERVE_RECOVERY_NS) {
+            engineHeld--;
+            lastAcquireWaitNs = System.nanoTime();
+        }
+        int held;
+        synchronized (signal) {
+            held = jobs.size() + (busy ? 1 : 0);
+        }
+        return held + 1 + engineHeld + 2 <= count;
+    }
+
     /** True once if a deferred present found the swapchain out of date: vanilla reconfigures it. */
     public static boolean takeSurfaceLost() {
         boolean lost = surfaceLost;

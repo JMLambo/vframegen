@@ -1340,6 +1340,12 @@ public final class FrameGenerator {
             }
             genStartNs = System.nanoTime();
             for (int k = 1; k < frames; k++) {
+                // No free image: skip the rest of this pair's generated frames rather than
+                // wait, so frame generation never slows the real frames down.
+                if (!PresentThread.imageFree()) {
+                    statsSkips.merge("no-image", frames - k, Integer::sum);
+                    break;
+                }
                 try {
                     surface.acquireNextTexture();
                 } catch (SurfaceException e) {
