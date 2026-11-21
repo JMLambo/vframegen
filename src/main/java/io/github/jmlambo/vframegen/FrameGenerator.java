@@ -66,8 +66,13 @@ import java.util.concurrent.locks.LockSupport;
 public final class FrameGenerator {
     public static final FrameGenerator INSTANCE = new FrameGenerator();
 
-    /** With a shader pack, anything nearer than this (blocks) is taken to be the held item. */
-    private static final float LOCKED_DISTANCE = 0.5f;
+    /**
+     * With a shader pack, anything nearer than this (blocks) is taken to be the held item. Iris
+     * draws the hand with its depth squeezed to 1/8 (HandRenderer.DEPTH), so the hand reads far
+     * nearer than any block can be; 0.5 also caught blocks the player stands against, which then
+     * stayed unwarped and jumped between real frames.
+     */
+    private static final float LOCKED_DISTANCE = 0.2f;
     private static final int UBO_SIZE = 7 * 64 + 5 * 16;
 
     /** What vanilla's blit + present show at the end of this loop. */
