@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Motion blur (Quality, off by default): camera motion blur on every frame shown, real and
+  generated, along that frame's own motion, so its length is right at any multiplier. GUI and the
+  held item stay sharp. A toast warns when the shader pack's own motion blur is on (it ghosts).
 - With render scale below 1.0, the log no longer fills with "Couldn't preload shader vframegen:…"
   errors during startup: the upscaler now waits until the game has loaded mod shaders.
 

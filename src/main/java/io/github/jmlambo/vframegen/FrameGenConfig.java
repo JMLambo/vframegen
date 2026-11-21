@@ -38,6 +38,8 @@ public final class FrameGenConfig {
     public int maxRealFrameAgeMs = 100;
     public float guiDiffThreshold = 0.004f;
     public float sharpness = 0.0f;
+    public boolean motionBlur = false;
+    public float motionBlurStrength = 0.5f;
     public double renderScale = 1.0;
     public boolean autoCap = true;
     public boolean presentThread = true;
@@ -77,6 +79,9 @@ public final class FrameGenConfig {
             maxRealFrameAgeMs       below this real frame rate (in ms per frame) generation pauses.
             guiDiffThreshold        how different a pixel must be after the GUI pass to count as GUI.
             sharpness               unsharp mask applied to generated frames, 0 = off.
+            motionBlur              camera motion blur on every frame shown, along that frame's own motion
+                                    (turn the shader pack's motion blur off: it ghosts with frame generation).
+            motionBlurStrength      0.1 to 1.0: blur length as a fraction of the time between shown frames.
             displayHz               refresh rate the auto cap divides (0 = ask the system; some virtual
                                     displays report 60 Hz when they run faster).
             allowVsync              keep VSync on with frame generation (set when you confirm turning it
@@ -126,6 +131,8 @@ public final class FrameGenConfig {
                 c.maxRealFrameAgeMs = (int) dbl(props, "maxRealFrameAgeMs", c.maxRealFrameAgeMs);
                 c.guiDiffThreshold = (float) dbl(props, "guiDiffThreshold", c.guiDiffThreshold);
                 c.sharpness = (float) dbl(props, "sharpness", c.sharpness);
+                c.motionBlur = bool(props, "motionBlur", c.motionBlur);
+                c.motionBlurStrength = (float) Math.clamp(dbl(props, "motionBlurStrength", c.motionBlurStrength), 0.1, 1.0);
                 c.debugTint = bool(props, "debugTint", c.debugTint);
                 c.debugCaptures = bool(props, "debugCaptures", c.debugCaptures);
                 c.debugFrameLog = bool(props, "debugFrameLog", c.debugFrameLog);
@@ -163,6 +170,8 @@ public final class FrameGenConfig {
         values.put("maxRealFrameAgeMs", Integer.toString(maxRealFrameAgeMs));
         values.put("guiDiffThreshold", Float.toString(guiDiffThreshold));
         values.put("sharpness", Float.toString(sharpness));
+        values.put("motionBlur", Boolean.toString(motionBlur));
+        values.put("motionBlurStrength", Float.toString(motionBlurStrength));
         values.put("debugTint", Boolean.toString(debugTint));
         values.put("debugCaptures", Boolean.toString(debugCaptures));
         values.put("debugFrameLog", Boolean.toString(debugFrameLog));
