@@ -366,7 +366,9 @@ public final class FrameGenerator {
         if (VFrameGen.config().displayHz > 0) refresh = VFrameGen.config().displayHz;
         if (!(refresh >= 30f)) refresh = 60f;
         int m = Math.clamp(VFrameGen.config().multiplier, 2, FrameGenConfig.MAX_MULTIPLIER);
-        int full = Math.max(1, (int) Math.floor(refresh / m));
+        // Adaptive: real frames never beyond the target (frame generation makes up the rest).
+        int full = VFrameGen.config().adaptive ? VFrameGen.config().targetFps
+                : Math.max(1, (int) Math.floor(refresh / m));
         capFloor = Math.min(full, Math.max(20, full / 2));
         // With the present thread no idle time is needed: just never make more frames than the
         // display can show (the extra ones would be dropped unevenly).
@@ -569,7 +571,8 @@ public final class FrameGenerator {
                 genPlanned = true;
                 genStartNs = 0;
                 nextFrame = 1;
-                frames = Math.clamp(VFrameGen.config().multiplier, 2, FrameGenConfig.MAX_MULTIPLIER);
+                frames = framesPerReal(finished.extractNs - b.extractNs);
+                if (frames < 2) genPlanned = false; // the real frames already reach the target
                 return b.finalView;
             }
             endCapture(null);
@@ -587,6 +590,30 @@ public final class FrameGenerator {
             present = Present.VANILLA;
             return vanillaView;
         }
+    }
+
+    // Adaptive mode: frames shown per real frame, and the smoothed time between real frames.
+    private int adaptiveFrames = 2;
+    private double adaptiveIntervalNs;
+
+    /**
+     * Frames shown per real frame (1 = none generated) for a real frame that took intervalNs: the
+     * multiplier, or in adaptive mode what reaches the target frame rate. That changes only when
+     * the ideal count is clearly past the next whole number, so it does not flip every frame.
+     */
+    private int framesPerReal(long intervalNs) {
+        FrameGenConfig cfg = VFrameGen.config();
+        if (!cfg.adaptive) return Math.clamp(cfg.multiplier, 2, FrameGenConfig.MAX_MULTIPLIER);
+        if (intervalNs > 0 && intervalNs < 250_000_000L) {
+            adaptiveIntervalNs = adaptiveIntervalNs <= 0 ? intervalNs
+                    : adaptiveIntervalNs + (intervalNs - adaptiveIntervalNs) * 0.1;
+        }
+        if (adaptiveIntervalNs <= 0) return adaptiveFrames;
+        double ideal = cfg.targetFps * adaptiveIntervalNs / 1e9;
+        if (Math.abs(ideal - adaptiveFrames) > 0.6) {
+            adaptiveFrames = (int) Math.clamp(Math.round(ideal), 1, FrameGenConfig.MAX_MULTIPLIER);
+        }
+        return adaptiveFrames;
     }
 
     /** True while a generated frame is being submitted (see VulkanTransientMemoryMixin). */
@@ -733,7 +760,8 @@ public final class FrameGenerator {
         if (cfg.maxCameraTurnDegrees > 0 && turnDeg > cfg.maxCameraTurnDegrees) { skip("turn"); return; }
 
         currentProjection(gr, state, cam, curProj);
-        int m = Math.clamp(cfg.multiplier, 2, FrameGenConfig.MAX_MULTIPLIER);
+        int m = framesPerReal(loopNs);
+        if (m < 2) { skip("target"); return; }
         long budget = (long) (emaLoopNs * 0.5);
         capture = DebugCapture.begin();
         if (capture) {

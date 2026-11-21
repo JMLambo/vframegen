@@ -14,7 +14,7 @@ final class ClothConfigScreen {
     static Screen create(Screen parent) {
         FrameGenConfig cfg = VFrameGen.config();
         FrameGenConfig def = new FrameGenConfig();
-        int multiplierBefore = cfg.multiplier;
+        int maxFramesBefore = cfg.maxFramesPerReal();
 
         ConfigBuilder builder = ConfigBuilder.create()
                 .setParentScreen(parent)
@@ -23,7 +23,7 @@ final class ClothConfigScreen {
                     cfg.save();
                     FrameGenerator.INSTANCE.invalidate();
                     // The swapchain's image count follows the multiplier: recreate it.
-                    if (cfg.multiplier != multiplierBefore) {
+                    if (cfg.maxFramesPerReal() != maxFramesBefore) {
                         FrameGenerator.recreateSurface(net.minecraft.client.Minecraft.getInstance());
                     }
                 });
@@ -37,6 +37,13 @@ final class ClothConfigScreen {
                 .setDefaultValue(def.multiplier).setTooltip(tip("multiplier"))
                 .setTextGetter(v -> Component.literal(v + "x"))
                 .setSaveConsumer(v -> cfg.multiplier = v).build());
+        general.addEntry(e.startBooleanToggle(t("adaptive"), cfg.adaptive)
+                .setDefaultValue(def.adaptive).setTooltip(tip("adaptive"))
+                .setSaveConsumer(v -> cfg.adaptive = v).build());
+        general.addEntry(e.startIntSlider(t("targetFps"), cfg.targetFps, 30, 500)
+                .setDefaultValue(def.targetFps).setTooltip(tip("targetFps"))
+                .setTextGetter(v -> Component.literal(v + " fps"))
+                .setSaveConsumer(v -> cfg.targetFps = v).build());
         general.addEntry(e.startEnumSelector(t("mode"), FrameGenConfig.Mode.class, cfg.mode)
                 .setDefaultValue(def.mode).setTooltip(tip("mode"))
                 .setEnumNameProvider(v -> Component.translatable("vframegen.config.mode." + v.name().toLowerCase(java.util.Locale.ROOT)))

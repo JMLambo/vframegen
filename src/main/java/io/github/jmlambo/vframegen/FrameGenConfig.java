@@ -17,8 +17,15 @@ public final class FrameGenConfig {
 
     public static final int MAX_MULTIPLIER = 6;
 
+    /** The most frames shown per real frame with these settings (sizes the swapchain). */
+    public int maxFramesPerReal() {
+        return adaptive ? MAX_MULTIPLIER : Math.clamp(multiplier, 2, MAX_MULTIPLIER);
+    }
+
     public boolean enabled = true;
     public int multiplier = 2;
+    public boolean adaptive = false;
+    public int targetFps = 120;
     public Mode mode = Mode.INTERPOLATED;
     public boolean disableWhileScreenOpen = true;
     public DepthMode depthMode = DepthMode.AUTO;
@@ -46,6 +53,9 @@ public final class FrameGenConfig {
             enabled                 generate frames between real frames.
             multiplier              2 to 6: frames shown per real frame (2 = one generated frame per
                                     real one). Costs GPU time per extra frame, no extra VRAM.
+            adaptive                instead of a fixed multiplier, pick frames per real frame (1 to 6)
+                                    to reach targetFps. Real frames are capped at targetFps.
+            targetFps               30 to 500: frames per second shown in adaptive mode.
             disableWhileScreenOpen  only generate while no menu or inventory is open.
             mode                    INTERPOLATED or LOW_LATENCY. INTERPOLATED holds each real frame back by
                                     one frame and builds the in-between frames from both neighbours: no
@@ -95,6 +105,8 @@ public final class FrameGenConfig {
                 props.load(r);
                 c.enabled = bool(props, "enabled", c.enabled);
                 c.multiplier = Math.clamp((int) dbl(props, "multiplier", c.multiplier), 2, MAX_MULTIPLIER);
+                c.adaptive = bool(props, "adaptive", c.adaptive);
+                c.targetFps = Math.clamp((int) dbl(props, "targetFps", c.targetFps), 30, 500);
                 c.disableWhileScreenOpen = bool(props, "disableWhileScreenOpen", c.disableWhileScreenOpen);
                 c.mode = enumOf(props, "mode", c.mode, Mode.class);
                 c.depthMode = enumOf(props, "depthMode", c.depthMode, DepthMode.class);
@@ -128,6 +140,8 @@ public final class FrameGenConfig {
         java.util.TreeMap<String, String> values = new java.util.TreeMap<>();
         values.put("enabled", Boolean.toString(enabled));
         values.put("multiplier", Integer.toString(multiplier));
+        values.put("adaptive", Boolean.toString(adaptive));
+        values.put("targetFps", Integer.toString(targetFps));
         values.put("disableWhileScreenOpen", Boolean.toString(disableWhileScreenOpen));
         values.put("mode", mode.name());
         values.put("depthMode", depthMode.name());
