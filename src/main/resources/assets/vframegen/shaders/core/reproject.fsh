@@ -99,8 +99,20 @@ bool offscreen(vec2 uv) {
     return any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)));
 }
 
-vec3 sceneColor(sampler2D world, sampler2D noHand, vec2 uv, vec4 flags) {
-    return flags.x > 0.5 ? texture(noHand, uv).rgb : texture(world, uv).rgb;
+// The world at uv, without the held item. World and NoHand differ only where the hand was, so
+// NoHand is read only there: with render scale it is the low-resolution image from before the
+// upscaler, and reading it everywhere made generated frames soft next to the upscaled real frames
+// (fine textures such as water flickered between sharp and soft: shaking).
+vec3 sceneColor(sampler2D world, sampler2D noHand, sampler2D mask, vec2 uv, vec4 flags) {
+    bool behindHand = false;
+    if (flags.x > 0.5) {
+        // Within a pixel of the hand too: a filtered World read there would pick up its edge.
+        vec2 px = Params2.zw;
+        behindHand = texture(mask, uv).r > 0.5 || texture(mask, uv + vec2(px.x, 0.0)).r > 0.5
+                  || texture(mask, uv - vec2(px.x, 0.0)).r > 0.5 || texture(mask, uv + vec2(0.0, px.y)).r > 0.5
+                  || texture(mask, uv - vec2(0.0, px.y)).r > 0.5;
+    }
+    return behindHand ? texture(noHand, uv).rgb : texture(world, uv).rgb;
 }
 
 Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampler2D noHand, sampler2D finalTex,
@@ -208,13 +220,13 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
         vec2 size = 1.0 / Params2.zw;
         uv = (floor(uv * size) + 0.5) / size;
     }
-    vec3 c = sceneColor(world, noHand, uv, flags);
+    vec3 c = sceneColor(world, noHand, mask, uv, flags);
     if (Params.z > 0.0) {
         vec2 px = Params2.zw;
-        vec3 blur = sceneColor(world, noHand, uv + vec2(px.x, 0.0), flags)
-                  + sceneColor(world, noHand, uv - vec2(px.x, 0.0), flags)
-                  + sceneColor(world, noHand, uv + vec2(0.0, px.y), flags)
-                  + sceneColor(world, noHand, uv - vec2(0.0, px.y), flags);
+        vec3 blur = sceneColor(world, noHand, mask, uv + vec2(px.x, 0.0), flags)
+                  + sceneColor(world, noHand, mask, uv - vec2(px.x, 0.0), flags)
+                  + sceneColor(world, noHand, mask, uv + vec2(0.0, px.y), flags)
+                  + sceneColor(world, noHand, mask, uv - vec2(0.0, px.y), flags);
         c = clamp(c + (c - blur * 0.25) * Params.z, 0.0, 1.0);
     }
     w.color = c;

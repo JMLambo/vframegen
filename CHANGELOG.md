@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- With render scale and shaders off, generated frames used the low-resolution image from before the
+  upscaler, so they were softer than real frames: fine textures such as water flickered between
+  sharp and soft (very visible with the edge-adaptive upscaler). They now use the upscaled image,
+  and the low-resolution one only where the held item was.
+
 ## 0.1.0-alpha.8
 
 - No more oval of moving world in a still frame with shaders off: vanilla's vignette (drawn with the
