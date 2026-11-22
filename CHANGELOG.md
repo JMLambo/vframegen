@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Generated frames no longer go missing with a GPU-heavy shader pack on Vulkan (NVIDIA): each one
+  now takes a swapchain image only when it is due, on a second queue of its own, instead of holding
+  one while it waits. Before, with the render thread a frame ahead, the swapchain ran out of images
+  and adaptive mode fell well short of its target (for example ~130 of 180 fps). Used only with a
+  plain 8-bit sRGB swapchain (not with an HDR mod) and when the GPU has a spare graphics queue;
+  otherwise frames go through the swapchain as before.
+
 ## 1.0.0-beta.2
 
 - Blocks next to moving entities no longer flicker in generated frames. Only pixels an entity

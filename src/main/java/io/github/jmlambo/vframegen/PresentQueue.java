@@ -143,7 +143,7 @@ public final class PresentQueue {
 
     /** Whether generated frames can wait in pending buffers (a queue, a swapchain, buffers). */
     public static synchronized boolean ready() {
-        if (queue == null || swapchain == 0 || images.length == 0) return false;
+        if (queue == null || swapchain == 0 || images.length == 0 || !plainFormat) return false;
         // The buffers are remade for a new window size a little after the swapchain is.
         if (slotWidth != swapchainWidth || slotHeight != swapchainHeight) return false;
         for (long image : slotImage) if (image == 0) return false;
@@ -162,9 +162,29 @@ public final class PresentQueue {
         }
     }
 
+    // VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_B8G8R8A8_UNORM: the game's own (SDR) swapchain formats.
+    private static final int FORMAT_RGBA8 = 37, FORMAT_BGRA8 = 44;
+    private static volatile boolean plainFormat;
+    private static int loggedFormat = -1;
+
     /** VulkanSurfaceMixin, after the swapchain was (re)created. */
-    public static synchronized void onSwapchain(long handle, LongList swapchainImages, int width, int height) {
+    public static synchronized void onSwapchain(long handle, LongList swapchainImages, int width, int height, int format, int colorSpace) {
         if (device == null) return;
+        // Only the plain 8-bit formats the game itself picks. Another mod's swapchain (an HDR mod's
+        // 10-bit or floating-point one, with its own colour encoding) gets its frames converted by
+        // that mod; a raw blit of ours into it showed every generated frame in wildly wrong colours
+        // (flashing). Then generated frames go through the game's own path, as before.
+        // Read from the create call itself (an HDR mod changes them there, not in the game's field);
+        // unknown (-1) counts as not plain. Colour space 0: VK_COLOR_SPACE_SRGB_NONLINEAR_KHR.
+        plainFormat = (format == FORMAT_RGBA8 || format == FORMAT_BGRA8) && colorSpace == 0;
+        int key = format * 1009 + colorSpace;
+        if (key != loggedFormat) {
+            loggedFormat = key;
+            if (!plainFormat) {
+                VFrameGen.LOGGER.info("Present queue off: the swapchain has format {} colour space {} (not plain 8-bit sRGB, likely an HDR mod)",
+                        format, colorSpace);
+            }
+        }
         waitIdle();
         try (MemoryStack stack = MemoryStack.stackPush()) {
             for (long s : presentSemaphores) VK12.vkDestroySemaphore(device, s, null);
