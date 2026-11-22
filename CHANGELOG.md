@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.0-alpha.9
+
 - Blocks seen through water no longer shake in generated frames (with or without shaders): they were moved by the
   water surface's depth, too far, and snapped back at each real frame. Generated frames now use the
   depth from before water and other translucents are drawn (with Iris, the pack's depthtex1 copy).
