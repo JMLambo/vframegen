@@ -19,5 +19,6 @@ public abstract class VulkanDeviceMixin {
             PresentQueue.plan(plan.vframegen$presentFamily(), plan.vframegen$presentIndex());
             PresentQueue.init(vkDevice);
         }
+        io.github.jmlambo.vframegen.OpticalFlow.init(vkDevice);
     }
 }
