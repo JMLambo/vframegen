@@ -293,6 +293,8 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
                     haveMiss = true;
                 }
                 if (sky) break;
+                // Converged: the next step would read (almost) the same spot again.
+                if (errPx < 0.05) break;
                 uv += uvDst - landed;
             }
         }
