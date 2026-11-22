@@ -130,7 +130,7 @@ public final class FrameGenConfig {
         boolean readFailed = false;
         if (!Files.exists(p) && !Files.notExists(p)) {
             // Can't tell whether it exists (e.g. no access): not a fresh install, and not ours to replace.
-            VFrameGen.LOGGER.warn("Could not check {}, using defaults without overwriting it", p);
+            VFrameGen.LOGGER.warn("Could not check {}, using defaults; it is not written at startup, but saving settings will replace it", p);
             c.firstRunPending = false;
             return c;
         }
@@ -176,7 +176,7 @@ public final class FrameGenConfig {
                 c.upscaler = enumOf(props, "upscaler", c.upscaler, Upscaler.class);
                 c.upscaleSharpness = Math.clamp(dbl(props, "upscaleSharpness", c.upscaleSharpness), 0.0, 1.0);
             } catch (IOException | RuntimeException e) {
-                VFrameGen.LOGGER.warn("Could not read {}, using defaults without overwriting it", p, e);
+                VFrameGen.LOGGER.warn("Could not read {}, using defaults; it is not written at startup, but saving settings will replace it", p, e);
                 readFailed = true;
             }
         }
