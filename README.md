@@ -1,10 +1,14 @@
-<img src="src/main/resources/assets/vframegen/icon.png" alt="" width="96" align="right">
+<p align="center">
+  <img src="src/main/resources/assets/vframegen/icon.png" alt="VFrameGen icon" width="96">
+</p>
 
-# VFrameGen
+<h1 align="center">VFrameGen</h1>
 
-[![Build](https://github.com/JMLambo/vframegen/actions/workflows/build.yml/badge.svg)](https://github.com/JMLambo/vframegen/actions/workflows/build.yml)
-[![Release](https://img.shields.io/github/v/release/JMLambo/vframegen?include_prereleases&label=release)](https://github.com/JMLambo/vframegen/releases)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+<p align="center">
+  <a href="https://github.com/JMLambo/vframegen/actions/workflows/build.yml"><img src="https://github.com/JMLambo/vframegen/actions/workflows/build.yml/badge.svg" alt="Build"></a>
+  <a href="https://github.com/JMLambo/vframegen/releases"><img src="https://img.shields.io/github/v/release/JMLambo/vframegen?include_prereleases&label=release" alt="Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+</p>
 
 Frame generation for Minecraft **26.3** (Fabric) that works on the **Vulkan** renderer, as well as
 OpenGL, including with **Iris shader packs**, **Sodium** and **Distant Horizons**. It also has
