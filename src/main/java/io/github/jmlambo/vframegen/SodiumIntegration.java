@@ -125,7 +125,8 @@ public final class SodiumIntegration implements ConfigEntryPoint {
         // Greyed out unless the GPU has hardware optical flow (NVIDIA RTX 20 and newer, on Vulkan).
         quality.addOption(bool(b, storage, "opticalFlow", def.opticalFlow, v -> cfg.opticalFlow = v, () -> cfg.opticalFlow)
                 .setTooltip(OpticalFlow.available() ? tip("opticalFlow") : tip("opticalFlow.unsupported"))
-                .setEnabledProvider(st -> OpticalFlow.available()));
+                // Re-checked whenever the screen is rebuilt (optical flow turns itself off on a GPU error).
+                .setEnabledProvider(st -> OpticalFlow.available(), net.caffeinemc.mods.sodium.api.config.ConfigState.UPDATE_ON_REBUILD));
 
         var page = b.createOptionPage()
                 .setName(Component.translatable("vframegen.sodium.page"))
