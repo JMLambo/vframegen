@@ -1285,6 +1285,31 @@ public final class FrameGenerator {
     private final double[] nearDist = new double[FrameSlot.MAX_ENTITIES];
     private final float[] nearTick = new float[FrameSlot.MAX_ENTITIES];
 
+    private static final double ENTITY_SIDE_PAD = 0.3;
+
+    /**
+     * How far an entity's box may reach past its hitbox on one side (axis 0 = x, 2 = z; dir -1 or
+     * 1): ENTITY_SIDE_PAD, or less when a block is nearer, stopping just short of its face.
+     */
+    private static double sidePad(Minecraft mc, net.minecraft.world.entity.Entity e,
+            net.minecraft.world.phys.AABB hb, int axis, int dir) {
+        double edge = axis == 0 ? (dir > 0 ? hb.maxX : hb.minX) : (dir > 0 ? hb.maxZ : hb.minZ);
+        double lo = dir > 0 ? edge : edge - ENTITY_SIDE_PAD, hi = dir > 0 ? edge + ENTITY_SIDE_PAD : edge;
+        net.minecraft.world.phys.AABB slab = axis == 0
+                ? new net.minecraft.world.phys.AABB(lo, hb.minY + 0.02, hb.minZ, hi, hb.maxY, hb.maxZ)
+                : new net.minecraft.world.phys.AABB(hb.minX, hb.minY + 0.02, lo, hb.maxX, hb.maxY, hi);
+        double pad = ENTITY_SIDE_PAD;
+        for (net.minecraft.world.phys.shapes.VoxelShape shape : mc.level.getBlockCollisions(e, slab)) {
+            for (net.minecraft.world.phys.AABB b : shape.toAabbs()) {
+                if (!b.intersects(slab)) continue;
+                double face = axis == 0 ? (dir > 0 ? b.minX - edge : edge - b.maxX)
+                        : (dir > 0 ? b.minZ - edge : edge - b.maxZ);
+                pad = Math.min(pad, face - 0.02);
+            }
+        }
+        return Math.max(pad, -0.05); // slightly inside the hitbox when it touches the block
+    }
+
     /** The entities near the camera this frame, nearest first (FrameSlot.MAX_ENTITIES at most). */
     private void captureEntities(FrameSlot c, boolean firstPerson) {
         c.entityCount = 0;
@@ -1324,8 +1349,14 @@ public final class FrameGenerator {
             double py = net.minecraft.util.Mth.lerp(pt, e.yo, e.getY());
             double pz = net.minecraft.util.Mth.lerp(pt, e.zo, e.getZ());
             // The box around the entity's position, padded: models (and model mods such as
-            // Fresh Animations) reach past the hitbox.
-            net.minecraft.world.phys.AABB box = e.getBoundingBox().move(-e.getX(), -e.getY(), -e.getZ()).inflate(0.6, 0.35, 0.6);
+            // Fresh Animations) reach past the hitbox. Not below its feet, and on each side only up
+            // to the nearest block there: the floor it walks on and walls next to it would move with
+            // it (flicker).
+            net.minecraft.world.phys.AABB world = e.getBoundingBox();
+            net.minecraft.world.phys.AABB hit = world.move(-e.getX(), -e.getY(), -e.getZ());
+            net.minecraft.world.phys.AABB box = new net.minecraft.world.phys.AABB(
+                    hit.minX - sidePad(mc, e, world, 0, -1), hit.minY + 0.02, hit.minZ - sidePad(mc, e, world, 2, -1),
+                    hit.maxX + sidePad(mc, e, world, 0, 1), hit.maxY + 0.35, hit.maxZ + sidePad(mc, e, world, 2, 1));
             int i = c.entityCount++;
             c.entityIds[i] = e.getId();
             c.entityPos[i * 3] = px;
