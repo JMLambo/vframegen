@@ -1,9 +1,5 @@
-# Sections for the release notes GitHub generates from merged pull requests.
+# Generated release notes (the Release workflow's --generate-notes): release bump PRs are left out.
 changelog:
-  categories:
-    - title: New
-      labels: [enhancement]
-    - title: Fixes
-      labels: [bug]
-    - title: Other changes
-      labels: ["*"]
+  exclude:
+    labels:
+      - release
