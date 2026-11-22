@@ -42,6 +42,10 @@ layout(std140) uniform FrameGen {
     vec4 AFlags;   // x: hand buffer valid, y: near-depth hand lock, z: its depth threshold, w: use depth
     vec4 BFlags;
     vec4 Mix;      // x: position between A (0) and B (1)
+    vec4 EntCount; // x: entities in A, y: in B
+    // Per source, 32 x (box min, box max, motion to the output frame), relative to its camera.
+    vec4 EntA[96];
+    vec4 EntB[96];
 };
 
 layout(location = 0) in vec2 texCoord;
@@ -79,13 +83,29 @@ vec3 projectDirection(vec2 uvDst, mat4 srcViewProjRot) {
     return vec3((clip.xy / clip.w) * 0.5 + 0.5, 1.0);
 }
 
+// A point (relative to the source camera) inside a moving entity's box moves with it as well.
+// Root motion only, so it is the same for any model or animation mod.
+vec3 entityMotion(vec3 p, bool fromB) {
+    int n = int(fromB ? EntCount.y : EntCount.x);
+    for (int i = 0; i < n; i++) {
+        vec3 lo = fromB ? EntB[i * 3].xyz : EntA[i * 3].xyz;
+        vec3 hi = fromB ? EntB[i * 3 + 1].xyz : EntA[i * 3 + 1].xyz;
+        if (all(greaterThanEqual(p, lo)) && all(lessThanEqual(p, hi))) {
+            return fromB ? EntB[i * 3 + 2].xyz : EntA[i * 3 + 2].xyz;
+        }
+    }
+    return vec3(0.0);
+}
+
 // Where a source pixel lands in the output. z is 0 when it lands behind the output camera (or the
 // depth unprojects to nothing): never a match.
-vec3 landingSpot(vec2 uvSrc, float depth, mat4 invViewProj, mat4 dstViewProj) {
+vec3 landingSpot(vec2 uvSrc, float depth, mat4 invViewProj, mat4 dstViewProj, bool fromB) {
     float ndcZ = Params2.y > 0.5 ? depth : depth * 2.0 - 1.0;
     vec4 p = invViewProj * vec4(uvSrc * 2.0 - 1.0, ndcZ, 1.0);
     if (abs(p.w) < 1.0e-12) return vec3(-1.0, -1.0, 0.0);
-    vec4 clip = dstViewProj * vec4(p.xyz / p.w, 1.0);
+    vec3 pos = p.xyz / p.w;
+    pos += entityMotion(pos, fromB);
+    vec4 clip = dstViewProj * vec4(pos, 1.0);
     if (clip.w <= 1.0e-6) return vec3(-1.0, -1.0, 0.0);
     return vec3((clip.xy / clip.w) * 0.5 + 0.5, 1.0);
 }
@@ -122,7 +142,7 @@ vec3 sceneColor(sampler2D world, sampler2D noHand, sampler2D mask, vec2 uv, vec4
 }
 
 Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampler2D noHand, sampler2D finalTex,
-          mat4 invViewProj, mat4 dstViewProj, mat4 viewProjRot, vec4 flags) {
+          mat4 invViewProj, mat4 dstViewProj, mat4 viewProjRot, vec4 flags, bool fromB) {
     Warp w;
     w.near = -1.0;
     w.hit = true;
@@ -171,7 +191,7 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
                 vec2 uvc = clamp(uv, 0.0, 1.0);
                 float d = texture(depthTex, uvc).r;
                 bool sky = isSky(d);
-                vec3 spot = sky ? vec3(uvDst + (uvc - skyUv), 1.0) : landingSpot(uvc, d, invViewProj, dstViewProj);
+                vec3 spot = sky ? vec3(uvDst + (uvc - skyUv), 1.0) : landingSpot(uvc, d, invViewProj, dstViewProj, fromB);
                 if (spot.z < 0.5) break; // behind the output camera: this chain can't go on
                 vec2 landed = spot.xy;
                 float errPx = length((landed - uvDst) * screen);
@@ -254,12 +274,12 @@ vec3 debugColor(vec3 color, int reason) {
 
 void main() {
     vec2 uvDst = texCoord;
-    Warp a = warp(uvDst, WorldA, DepthA, MaskA, NoHandA, FinalA, AInvViewProj, ADstViewProj, AViewProjRot, AFlags);
+    Warp a = warp(uvDst, WorldA, DepthA, MaskA, NoHandA, FinalA, AInvViewProj, ADstViewProj, AViewProjRot, AFlags, false);
     vec3 color = a.color;
     int reason = a.reason;
 
 #ifdef INTERPOLATE
-    Warp b = warp(uvDst, WorldB, DepthB, MaskB, NoHandB, FinalB, BInvViewProj, BDstViewProj, BViewProjRot, BFlags);
+    Warp b = warp(uvDst, WorldB, DepthB, MaskB, NoHandB, FinalB, BInvViewProj, BDstViewProj, BViewProjRot, BFlags, true);
     float t = Mix.x;
     bool aFixed = a.reason == R_GUI || a.reason == R_HAND || a.reason == R_LOCKED;
     bool bFixed = b.reason == R_GUI || b.reason == R_HAND || b.reason == R_LOCKED;

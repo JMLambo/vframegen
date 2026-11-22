@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Moving entities in generated frames: mobs, players, boats and minecarts now move with their own
+  motion between real frames instead of only the camera's (they used to jump to the next real frame's
+  position, a stutter). Root motion of the 32 nearest entities, from their bounding boxes, so it works
+  the same with model mods (EMF/ETF, Fresh Animations).
+
 - An unreadable config file is no longer lost: a copy (vframegen.properties.broken-<time>) is kept
   before settings are first saved over it; if the copy can't be made, that save is skipped.
 

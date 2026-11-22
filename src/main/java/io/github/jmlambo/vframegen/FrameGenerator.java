@@ -75,7 +75,8 @@ public final class FrameGenerator {
      * stayed unwarped and jumped between real frames.
      */
     private static final float LOCKED_DISTANCE = 0.2f;
-    private static final int UBO_SIZE = 7 * 64 + 5 * 16;
+    // + entity count, and per source FrameSlot.MAX_ENTITIES x (box min, box max, motion).
+    private static final int UBO_SIZE = 7 * 64 + 6 * 16 + 2 * FrameSlot.MAX_ENTITIES * 3 * 16;
 
     /** What vanilla's blit + present show at the end of this loop. */
     public enum Present { VANILLA, HELD }
@@ -1162,6 +1163,12 @@ public final class FrameGenerator {
             putFlags(ub, a, irisShaders, useDepth, zeroToOne);
             putFlags(ub, bb, irisShaders, useDepth, zeroToOne);
             ub.putVec4(t, 0f, 0f, 0f);
+            // Moving entities: only between two real frames (interpolated), where both positions are known.
+            int countA = b != null ? putEntities(null, a, b, t) : 0;
+            int countB = b != null ? putEntities(null, b, a, 1f - t) : 0;
+            ub.putVec4(countA, countB, 0f, 0f);
+            putEntities(ub, a, b, t);
+            putEntities(ub, b != null ? b : a, b != null ? a : null, 1f - t);
             ByteBuffer data = ub.get();
             encoder.writeToBuffer(ubo.slice(), data);
         }
@@ -1178,6 +1185,88 @@ public final class FrameGenerator {
         }
         if (timer != null) encoder.writeTimestamp(timer, 1);
         return encoder;
+    }
+
+    /**
+     * Entities of source {@code src} that also are in {@code other}: their box (relative to src's
+     * camera) and how far they move from src to the output frame, a fraction {@code f} of the way to
+     * other. Written to ub when it isn't null (always all MAX_ENTITIES entries, unused ones empty).
+     * Returns how many there are. Root motion only: works the same for any model or animation mod
+     * (EMF/ETF, Fresh Animations), since the model itself is never looked at.
+     */
+    private int putEntities(Std140Builder ub, FrameSlot src, FrameSlot other, float f) {
+        int n = 0;
+        if (other != null) {
+            for (int i = 0; i < src.entityCount && n < FrameSlot.MAX_ENTITIES; i++) {
+                int j = indexOf(other, src.entityIds[i]);
+                if (j < 0) continue;
+                double dx = other.entityPos[j * 3] - src.entityPos[i * 3];
+                double dy = other.entityPos[j * 3 + 1] - src.entityPos[i * 3 + 1];
+                double dz = other.entityPos[j * 3 + 2] - src.entityPos[i * 3 + 2];
+                if (dx * dx + dy * dy + dz * dz < 1.0e-8 || dx * dx + dy * dy + dz * dz > 64.0) continue; // still, or teleported
+                if (ub != null) {
+                    float ox = (float) (src.entityPos[i * 3] - src.pos.x);
+                    float oy = (float) (src.entityPos[i * 3 + 1] - src.pos.y);
+                    float oz = (float) (src.entityPos[i * 3 + 2] - src.pos.z);
+                    float[] bx = src.entityBox;
+                    ub.putVec4(ox + bx[i * 6], oy + bx[i * 6 + 1], oz + bx[i * 6 + 2], 0f);
+                    ub.putVec4(ox + bx[i * 6 + 3], oy + bx[i * 6 + 4], oz + bx[i * 6 + 5], 0f);
+                    ub.putVec4((float) dx * f, (float) dy * f, (float) dz * f, 0f);
+                }
+                n++;
+            }
+        }
+        if (ub != null) {
+            for (int i = n; i < FrameSlot.MAX_ENTITIES; i++) {
+                ub.putVec4(0f, 0f, 0f, 0f).putVec4(-1f, -1f, -1f, 0f).putVec4(0f, 0f, 0f, 0f);
+            }
+        }
+        return n;
+    }
+
+    private static int indexOf(FrameSlot s, int id) {
+        for (int i = 0; i < s.entityCount; i++) if (s.entityIds[i] == id) return i;
+        return -1;
+    }
+
+    /** The entities near the camera this frame, nearest first (FrameSlot.MAX_ENTITIES at most). */
+    private void captureEntities(FrameSlot c, boolean firstPerson) {
+        c.entityCount = 0;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) return;
+        float pt = mc.getDeltaTracker().getGameTimeDeltaPartialTick(false);
+        java.util.List<net.minecraft.world.entity.Entity> found = new java.util.ArrayList<>();
+        java.util.List<Double> dist = new java.util.ArrayList<>();
+        net.minecraft.world.entity.Entity camera = mc.getCameraEntity();
+        for (net.minecraft.world.entity.Entity e : mc.level.entitiesForRendering()) {
+            if (e == camera && firstPerson) continue;
+            net.minecraft.world.phys.Vec3 p = e.getPosition(pt);
+            double d2 = p.distanceToSqr(c.pos.x, c.pos.y, c.pos.z);
+            if (d2 > 96.0 * 96.0) continue;
+            found.add(e);
+            dist.add(d2);
+        }
+        Integer[] order = new Integer[found.size()];
+        for (int i = 0; i < order.length; i++) order[i] = i;
+        java.util.Arrays.sort(order, (x, y) -> Double.compare(dist.get(x), dist.get(y)));
+        for (int k = 0; k < order.length && c.entityCount < FrameSlot.MAX_ENTITIES; k++) {
+            net.minecraft.world.entity.Entity e = found.get(order[k]);
+            net.minecraft.world.phys.Vec3 p = e.getPosition(pt);
+            // The box around the entity's position, padded: models (and model mods such as
+            // Fresh Animations) reach past the hitbox.
+            net.minecraft.world.phys.AABB box = e.getBoundingBox().move(-e.getX(), -e.getY(), -e.getZ()).inflate(0.35);
+            int i = c.entityCount++;
+            c.entityIds[i] = e.getId();
+            c.entityPos[i * 3] = p.x;
+            c.entityPos[i * 3 + 1] = p.y;
+            c.entityPos[i * 3 + 2] = p.z;
+            c.entityBox[i * 6] = (float) box.minX;
+            c.entityBox[i * 6 + 1] = (float) box.minY;
+            c.entityBox[i * 6 + 2] = (float) box.minZ;
+            c.entityBox[i * 6 + 3] = (float) box.maxX;
+            c.entityBox[i * 6 + 4] = (float) box.maxY;
+            c.entityBox[i * 6 + 5] = (float) box.maxZ;
+        }
     }
 
     private GpuQueryPool startGpuTimer(GpuDevice device, CommandEncoder encoder) {
@@ -1403,6 +1492,7 @@ public final class FrameGenerator {
         c.pos.set(cam.pos.x, cam.pos.y, cam.pos.z);
         c.viewRot.set(cam.viewRotationMatrix);
         c.firstPerson = cam.isFirstPerson;
+        captureEntities(c, cam.isFirstPerson);
         if (frameProjCaptured) c.projBob.set(frameProj);
         else currentProjection(gr, gr.gameRenderState(), cam, c.projBob);
         c.projPlain.set(cam.projectionMatrix);
