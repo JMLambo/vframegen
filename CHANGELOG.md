@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Blocks seen through water no longer shake in generated frames (with or without shaders): they were moved by the
+  water surface's depth, too far, and snapped back at each real frame. Generated frames now use the
+  depth from before water and other translucents are drawn (with Iris, the pack's depthtex1 copy).
 - Sodium integration: a VFrameGen page in Sodium's video settings with the main options (frame generation, upscaling, anti-aliasing, motion blur), and a button to the full settings screen.
 - Anti-aliasing (Quality, off by default): FXAA or SMAA (the reference SMAA by Jorge Jimenez et al., MIT) on the world, before the GUI, so the HUD stays sharp
   and generated frames are built from the smoothed image. Works with or without frame generation.

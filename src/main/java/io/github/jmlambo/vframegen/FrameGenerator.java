@@ -140,6 +140,8 @@ public final class FrameGenerator {
     private boolean frameProjCaptured;
     private final Matrix4f frameProj = new Matrix4f();
     private boolean frameWorldDepthCaptured;
+    /** The depth was taken before water and other translucents were drawn (captureOpaqueDepth). */
+    private boolean frameOpaqueDepthCaptured;
     private boolean frameHandCaptured;
     private boolean frameWorldCaptured;
     private Present present = Present.VANILLA;
@@ -321,6 +323,7 @@ public final class FrameGenerator {
         PackBlurCheck.tick(mc);
         frameProjCaptured = false;
         frameWorldDepthCaptured = false;
+        frameOpaqueDepthCaptured = false;
         frameHandCaptured = false;
         frameWorldCaptured = false;
         building = null;
@@ -1335,12 +1338,31 @@ public final class FrameGenerator {
         frameProjCaptured = true;
     }
 
+    /** Whether the level renderer should keep the depth from before translucents (see captureOpaqueDepth). */
+    public boolean wantsOpaqueDepth() {
+        return active() && !Compat.irisShadersActive();
+    }
+
+    /**
+     * Right before water and other translucents are drawn: the depth of the opaque world. Generated
+     * frames move each pixel by its depth, and both transparency modes leave the water surface's
+     * depth in the depth buffer, so blocks seen through water moved as if they were at the surface
+     * (several times too far when the surface is close) and snapped back at each real frame. With
+     * this depth they move right; the water surface on top of them is mostly a flat texture.
+     */
+    public void captureOpaqueDepth(GameRenderer gr) {
+        FrameSlot c = prepare(gr);
+        if (c == null) return;
+        frameOpaqueDepthCaptured = copy(gr.mainRenderTarget().getDepthTexture(), c.depth);
+    }
+
     /** Right before the held item is drawn: the depth buffer still has the whole world in it. */
     public void captureWorldDepth(GameRenderer gr) {
         FrameSlot c = prepare(gr);
         if (c == null) return;
         RenderTarget main = gr.mainRenderTarget();
-        frameWorldDepthCaptured = copy(main.getDepthTexture(), c.depth) && copy(main.getColorTexture(), c.noHand);
+        boolean depth = frameOpaqueDepthCaptured || copy(main.getDepthTexture(), c.depth);
+        frameWorldDepthCaptured = depth && copy(main.getColorTexture(), c.noHand);
     }
 
     /** Right after the held item is drawn, into a depth buffer that was cleared for it. */
@@ -1365,7 +1387,8 @@ public final class FrameGenerator {
         if (!frameWorldDepthCaptured) {
             // render3dHud did not run (or another mod replaced it): no separate hand pass. With
             // render scale the world's own (smaller) textures are the swapped-out ones.
-            if (!copy(RenderScale.worldDepth(main), c.depth) || !copy(RenderScale.worldColor(main), c.noHand)) {
+            if (!(frameOpaqueDepthCaptured || copy(RenderScale.worldDepth(main), c.depth))
+                    || !copy(RenderScale.worldColor(main), c.noHand)) {
                 c.valid = false;
                 return;
             }
@@ -1394,6 +1417,34 @@ public final class FrameGenerator {
         c.hasFinal = false;
         c.valid = true;
         buildMask(c);
+        // With a shader pack the depth buffer has the water surface in it (see captureOpaqueDepth);
+        // Iris keeps the depth from before translucents. Taken after buildMask, which needs the
+        // held item's depth (not in that copy); the mask keeps the item locked.
+        if (Compat.irisShadersActive()) {
+            GpuTexture opaque = Compat.irisDepthNoTranslucents();
+            if (opaque != null) drawDepth(opaque, c);
+        }
+    }
+
+    private GpuTexture irisDepthSource;
+    private GpuTextureView irisDepthSourceView;
+
+    /** Iris' textures can't be copied from, only sampled: draw the depth in with vanilla's depth blit. */
+    private void drawDepth(GpuTexture src, FrameSlot c) {
+        if (src.getWidth(0) != c.depth.getWidth(0) || src.getHeight(0) != c.depth.getHeight(0)) return;
+        if ((src.usage() & GpuTexture.USAGE_TEXTURE_BINDING) == 0) return;
+        if (src != irisDepthSource) {
+            if (irisDepthSourceView != null) irisDepthSourceView.close();
+            irisDepthSource = src;
+            irisDepthSourceView = RenderSystem.getDevice().createTextureView(src);
+        }
+        var descriptor = com.mojang.renderpearl.api.commands.RenderPassDescriptor.builder(() -> "VFrameGen depth before translucents")
+                .withDepthAttachment(c.depthView, java.util.OptionalDouble.empty()).build();
+        try (RenderPass pass = RenderSystem.getDevice().createCommandEncoder().createRenderPass(descriptor)) {
+            pass.setPipeline(RenderSystem.getCompiledPipeline(net.minecraft.client.renderer.RenderPipelines.INTEGRATE_DEPTH));
+            pass.setUniform("InSampler", irisDepthSourceView, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
+            pass.draw(3, 1, 0, 0);
+        }
     }
 
     /** The finished real frame, GUI included, right before it is blitted to the window. */
