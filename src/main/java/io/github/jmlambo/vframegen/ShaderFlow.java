@@ -39,6 +39,10 @@ public final class ShaderFlow {
     private static final int MIN_LEVEL_WIDTH = 48;
     private static int maxWidth = START_WIDTH;
 
+    // Least summed brightness gradient (0..1 per step, over a 4x4 block's 32 steps) for a block's
+    // vector to be trusted: about 1/255 per step. Flatter blocks are sky, fog or plain walls.
+    private static final float MIN_TEXTURE = 32f / 255f;
+
     private static RenderPipeline lumaPipeline, downPipeline, matchPipeline, smoothPipeline;
     private static boolean broken;
     private static int failures;
@@ -297,7 +301,7 @@ public final class ShaderFlow {
             float scale = l == 0 ? (float) w / levelW[0] : 1f;
             try (MemoryStack stack = MemoryStack.stackPush()) {
                 device.createCommandEncoder().writeToBuffer(ubo[l].slice(),
-                        Std140Builder.onStack(stack, 16).putVec4(top ? 0f : 1f, top ? 4f : 2f, scale, 0f).get());
+                        Std140Builder.onStack(stack, 16).putVec4(top ? 0f : 1f, top ? 4f : 2f, scale, l == 0 ? MIN_TEXTURE : 0f).get());
             }
         }
         current = -1;

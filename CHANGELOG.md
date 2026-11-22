@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Shader optical flow ignores blocks with almost no texture (sky, fog, plain walls), where its matches were noise.
 - Optical flow on every GPU (experimental where there is no optical flow hardware: AMD, Intel, or
   NVIDIA on OpenGL). It is measured with shaders, as a coarse-to-fine block search in the spirit of
   FSR 3's optical flow (draw passes, since the game's renderer has no compute shaders), with a
