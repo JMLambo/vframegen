@@ -396,7 +396,8 @@ public final class FrameGenerator {
         int total = fitCount + missCount;
         if (total >= 10 && lastAutoCap > 0) {
             boolean bad = missCount * 5 > total; // more than 20% early or late
-            boolean roomy = missCount == 0 && minSlackMs > 4.0;
+            // (Some slack measured: frames made at loop start have none.)
+            boolean roomy = missCount == 0 && minSlackMs < Double.MAX_VALUE && minSlackMs > 4.0;
             badSeconds = bad ? badSeconds + 1 : 0;
             roomySeconds = roomy ? roomySeconds + 1 : 0;
             if (badSeconds >= 2) {
