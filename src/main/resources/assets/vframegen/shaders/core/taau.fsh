@@ -18,16 +18,19 @@
 
 uniform sampler2D Color;   // this frame, low resolution (texelFetch; linear for the held item)
 uniform sampler2D Depth;   // its depth, before the held item
+uniform sampler2D PrevDepth; // last frame's depth (before the held item)
 uniform sampler2D Hand;    // held item depth (sky where there is none)
 uniform sampler2D History; // last output, full resolution (linear)
 
 layout(std140) uniform Taau {
     mat4 CurInvViewProj; // this frame's NDC (no jitter) -> position relative to its camera
     mat4 PrevViewProj;   // position relative to this frame's camera -> last frame's clip
+    mat4 PrevInvViewProj; // last frame's NDC (no jitter) -> position relative to its camera
     vec4 LowSize;        // xy: size, zw: 1/size
     vec4 FullSize;       // xy: size, zw: 1/size
     vec4 Jitter;         // xy: this frame's shift in low-res pixels, z: reset, w: hand valid
-    vec4 Flags;          // x: reversed Z, y: depth zero-to-one
+    vec4 Flags;          // x: reversed Z, y: depth zero-to-one, z: PrevDepth valid
+    vec4 CamDelta;       // xyz: this camera minus the last one
 };
 
 layout(location = 0) in vec2 texCoord;
@@ -120,12 +123,14 @@ void main() {
 
     // The held item is drawn without the jitter, so its samples sit at the texel centres: read it
     // as is (rebuilding it from jittered positions would shake it a little every frame).
+    // Alpha 1 marks it in the history, so it is never accumulated into the world (an afterimage
+    // where it was, once it moves away).
     if (hand) {
         fragColor = vec4(texture(Color, uv).rgb, 1.0);
         return;
     }
     if (Jitter.z > 0.5) {
-        fragColor = vec4(current, 1.0);
+        fragColor = vec4(current, 0.0);
         return;
     }
 
@@ -133,7 +138,9 @@ void main() {
     // objects from smearing the background over them).
     vec2 ndc = uv * 2.0 - 1.0;
     vec4 prevClip;
-    if (isSky(closest)) {
+    vec3 here = vec3(0.0);
+    bool sky = isSky(closest);
+    if (sky) {
         float farZ = Flags.x > 0.5 ? 0.0 : 1.0;
         if (Flags.y < 0.5) farZ = farZ * 2.0 - 1.0;
         vec4 a = CurInvViewProj * vec4(ndc, farZ, 1.0);
@@ -142,16 +149,40 @@ void main() {
     } else {
         float ndcZ = Flags.y > 0.5 ? closest : closest * 2.0 - 1.0;
         vec4 p = CurInvViewProj * vec4(ndc, ndcZ, 1.0);
-        prevClip = PrevViewProj * vec4(p.xyz / p.w, 1.0);
+        here = p.xyz / p.w;
+        prevClip = PrevViewProj * vec4(here, 1.0);
     }
     if (prevClip.w <= 1.0e-6) {
-        fragColor = vec4(current, 1.0);
+        fragColor = vec4(current, 0.0);
         return;
     }
     vec2 prevUv = (prevClip.xy / prevClip.w) * 0.5 + 0.5;
     if (any(lessThan(prevUv, vec2(0.0))) || any(greaterThan(prevUv, vec2(1.0)))) {
-        fragColor = vec4(current, 1.0);
+        fragColor = vec4(current, 0.0);
         return;
+    }
+    // The held item was there last frame: its colour is not the world's.
+    if (texture(History, prevUv).a > 0.01) {
+        fragColor = vec4(current, 0.0);
+        return;
+    }
+    // Something else was in front last frame (newly uncovered): the history there shows that, not
+    // this surface. Compared by distance from the last camera, with some slack (jitter, slopes).
+    if (Flags.z > 0.5 && !sky) {
+        float pd = texture(PrevDepth, prevUv).r;
+        // Only something nearer counts: farther (or sky) there is just a moving silhouette edge.
+        bool rejected = false;
+        if (!isSky(pd)) {
+            float pz = Flags.y > 0.5 ? pd : pd * 2.0 - 1.0;
+            vec4 q = PrevInvViewProj * vec4(prevUv * 2.0 - 1.0, pz, 1.0);
+            float seen = length(q.xyz / q.w);
+            float expected = length(here + CamDelta.xyz);
+            rejected = seen < expected - (0.05 * expected + 0.15);
+        }
+        if (rejected) {
+            fragColor = vec4(current, 0.0);
+            return;
+        }
     }
 
     vec3 history = sampleHistory(prevUv);
@@ -169,5 +200,5 @@ void main() {
     // Blend in a tonemapped space so a single bright sample does not flicker.
     float wc = alpha / (1.0 + dot(current, vec3(0.299, 0.587, 0.114)));
     float wh = (1.0 - alpha) / (1.0 + dot(history, vec3(0.299, 0.587, 0.114)));
-    fragColor = vec4((current * wc + history * wh) / (wc + wh), 1.0);
+    fragColor = vec4((current * wc + history * wh) / (wc + wh), 0.0);
 }

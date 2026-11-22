@@ -47,7 +47,7 @@ import java.util.Optional;
  * this falls back to the edge-adaptive upscaler.
  */
 public final class TemporalUpscaler {
-    private static final int UBO_SIZE = 64 * 2 + 16 * 4;
+    private static final int UBO_SIZE = 64 * 3 + 16 * 5;
     // Halton (2, 3): well spread sub-pixel positions, 8 per cycle.
     private static final float[][] JITTER = new float[8][2];
     static {
@@ -71,8 +71,17 @@ public final class TemporalUpscaler {
     private static boolean hasPrev;
     private static Level prevLevel;
 
-    private static GpuTexture depthCopy, handCopy;
-    private static GpuTextureView depthView, handView;
+    // World depth, this frame's and the last one's (to reject history of surfaces that were hidden).
+    private static final GpuTexture[] depthCopies = new GpuTexture[2];
+    private static final GpuTextureView[] depthViews = new GpuTextureView[2];
+    private static int depthIndex;
+    private static boolean prevDepthValid;
+    private static final Matrix4f prevInvViewProj = new Matrix4f();
+    private static GpuTexture handCopy;
+    private static GpuTextureView handView;
+    // The projection hook has run at least once: until then nothing jitters (a jitter without the
+    // capture that removes it again would just shift the picture).
+    private static boolean projectionHookSeen;
     private static boolean depthCaptured, handCaptured;
     private static GpuTexture[] history = new GpuTexture[2];
     private static GpuTextureView[] historyView = new GpuTextureView[2];
@@ -143,6 +152,7 @@ public final class TemporalUpscaler {
         double scale = RenderScale.scale();
         // A little less than the full log2: a touch of extra sharpness would shimmer.
         wantedBias = scale < 0.999 ? (float) (Math.log(scale) / Math.log(2) * 0.9) : 0f;
+        if (!projectionHookSeen) return;
         RenderTarget main = gr.mainRenderTarget();
         lowW = main.width;
         lowH = main.height;
@@ -171,6 +181,7 @@ public final class TemporalUpscaler {
 
     /** The world's projection as uploaded (shifted, with view bobbing): keep it, unshifted. */
     public static Matrix4f captureProjection(Matrix4f projection) {
+        projectionHookSeen = true;
         if (!jittered) return projection;
         Matrix4f plain = jitterMatrix(new Matrix4f(), -1f).mul(projection);
         curProj.set(plain);
@@ -181,20 +192,39 @@ public final class TemporalUpscaler {
     /** Before the held item: the world's depth. */
     public static void captureDepth(GameRenderer gr) {
         if (!jittered) return;
-        GpuTexture src = gr.mainRenderTarget().getDepthTexture();
-        if (src == null) return;
-        ensureLow(src);
-        depthCaptured = copy(src, depthCopy);
+        try {
+            GpuTexture src = gr.mainRenderTarget().getDepthTexture();
+            if (src == null) return;
+            ensureLow(src);
+            depthIndex ^= 1;
+            depthCaptured = copy(src, depthCopies[depthIndex]);
+        } catch (RuntimeException e) {
+            disable(e);
+        }
     }
 
     /** After the held item: its depth, in the HUD target or the main depth buffer. */
     public static void captureHand(GameRenderer gr, boolean usedHudTarget) {
         if (!jittered || !depthCaptured) return;
-        RenderTarget hud = ((GameRendererAccessor) gr).vframegen$hud3DTarget();
-        RenderTarget target = usedHudTarget && hud != null ? hud : gr.mainRenderTarget();
-        GpuTexture src = target.getDepthTexture();
-        if (src == null || src.getFormat() != handCopy.getFormat()) return;
-        handCaptured = copy(src, handCopy);
+        try {
+            RenderTarget hud = ((GameRendererAccessor) gr).vframegen$hud3DTarget();
+            RenderTarget target = usedHudTarget && hud != null ? hud : gr.mainRenderTarget();
+            GpuTexture src = target.getDepthTexture();
+            if (src == null || src.getFormat() != handCopy.getFormat()) return;
+            handCaptured = copy(src, handCopy);
+        } catch (RuntimeException e) {
+            disable(e);
+        }
+    }
+
+    /** Off for the rest of the session (the spatial upscalers take over), with nothing half-made left. */
+    public static void disable(RuntimeException e) {
+        if (!broken) VFrameGen.LOGGER.error("Temporal upscaling failed; using the edge-adaptive upscaler for this session", e);
+        broken = true;
+        jittered = false;
+        depthCaptured = handCaptured = curProjCaptured = false;
+        endLevel();
+        closeLow();
     }
 
     /**
@@ -216,6 +246,7 @@ public final class TemporalUpscaler {
             Matrix4f prev = new Matrix4f(prevViewProj).translate(
                     (float) (pos.x - prevPos.x), (float) (pos.y - prevPos.y), (float) (pos.z - prevPos.z));
             Matrix4f curInv = new Matrix4f(viewProj).invert();
+            boolean usePrevDepth = prevDepthValid && !reset;
             boolean zeroToOne = RenderSystem.getDevice().getDeviceInfo().isZZeroToOne();
             boolean reversedZ = ndcDepth(curProj, 1f) > ndcDepth(curProj, 100f);
 
@@ -225,10 +256,12 @@ public final class TemporalUpscaler {
                 ByteBuffer data = Std140Builder.onStack(stack, UBO_SIZE)
                         .putMat4f(curInv)
                         .putMat4f(prev)
+                        .putMat4f(prevInvViewProj)
                         .putVec4(lowW, lowH, 1f / lowW, 1f / lowH)
                         .putVec4(fullW, fullH, 1f / fullW, 1f / fullH)
                         .putVec4(jitterX, jitterY, reset ? 1f : 0f, handCaptured ? 1f : 0f)
-                        .putVec4(reversedZ ? 1f : 0f, zeroToOne ? 1f : 0f, 0f, 0f)
+                        .putVec4(reversedZ ? 1f : 0f, zeroToOne ? 1f : 0f, usePrevDepth ? 1f : 0f, 0f)
+                        .putVec4((float) (pos.x - prevPos.x), (float) (pos.y - prevPos.y), (float) (pos.z - prevPos.z), 0f)
                         .get();
                 encoder.writeToBuffer(ubo.slice(), data);
             }
@@ -237,14 +270,17 @@ public final class TemporalUpscaler {
             try (RenderPass pass = encoder.createRenderPass(() -> "VFrameGen TAAU", historyView[dst], Optional.empty())) {
                 pass.setPipeline(RenderSystem.getCompiledPipeline(pipeline(colorFormat)));
                 pass.setUniform("Color", colorLow, linear);
-                pass.setUniform("Depth", depthView, nearest);
-                pass.setUniform("Hand", handCaptured ? handView : depthView, nearest);
+                pass.setUniform("Depth", depthViews[depthIndex], nearest);
+                pass.setUniform("PrevDepth", depthViews[depthIndex ^ 1], nearest);
+                pass.setUniform("Hand", handCaptured ? handView : depthViews[depthIndex], nearest);
                 pass.setUniform("History", historyView[src], linear);
                 pass.setUniform("Taau", ubo);
                 pass.draw(3, 1, 0, 0);
             }
             current = dst;
             prevViewProj.set(viewProj);
+            prevInvViewProj.set(curInv);
+            prevDepthValid = true;
             prevPos.set(pos);
             prevLevel = level;
             hasPrev = true;
@@ -252,8 +288,7 @@ public final class TemporalUpscaler {
             jittered = false; // once per world frame (GUI-only frames call the upscaler too)
             return historyView[dst];
         } catch (RuntimeException e) {
-            broken = true;
-            VFrameGen.LOGGER.error("Temporal upscaling failed; using the edge-adaptive upscaler for this session", e);
+            disable(e);
             return null;
         }
     }
@@ -277,24 +312,31 @@ public final class TemporalUpscaler {
 
     private static void ensureLow(GpuTexture depthSrc) {
         int w = depthSrc.getWidth(0), h = depthSrc.getHeight(0);
-        if (depthCopy != null && depthCopy.getWidth(0) == w && depthCopy.getHeight(0) == h
-                && depthCopy.getFormat() == depthSrc.getFormat()) return;
+        GpuTexture d = depthCopies[0];
+        if (d != null && d.getWidth(0) == w && d.getHeight(0) == h && d.getFormat() == depthSrc.getFormat()) return;
         closeLow();
         GpuDevice device = RenderSystem.getDevice();
         int usage = GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING;
-        depthCopy = device.createTexture("VFrameGen TAAU depth", usage, depthSrc.getFormat(), w, h, 1, 1);
+        for (int i = 0; i < 2; i++) {
+            depthCopies[i] = device.createTexture("VFrameGen TAAU depth " + i, usage, depthSrc.getFormat(), w, h, 1, 1);
+            depthViews[i] = device.createTextureView(depthCopies[i]);
+        }
         handCopy = device.createTexture("VFrameGen TAAU hand depth", usage, depthSrc.getFormat(), w, h, 1, 1);
-        depthView = device.createTextureView(depthCopy);
         handView = device.createTextureView(handCopy);
     }
 
     private static void closeLow() {
-        if (depthView != null) depthView.close();
+        for (int i = 0; i < 2; i++) {
+            if (depthViews[i] != null) depthViews[i].close();
+            if (depthCopies[i] != null) depthCopies[i].close();
+            depthViews[i] = null;
+            depthCopies[i] = null;
+        }
         if (handView != null) handView.close();
-        if (depthCopy != null) depthCopy.close();
         if (handCopy != null) handCopy.close();
-        depthView = handView = null;
-        depthCopy = handCopy = null;
+        handView = null;
+        handCopy = null;
+        prevDepthValid = false;
     }
 
     /** True when the history was (re)created: nothing to accumulate yet. */
@@ -329,6 +371,7 @@ public final class TemporalUpscaler {
                 .withBindGroupLayout(BindGroupLayout.builder()
                         .withUniform("Color", UniformType.COMBINED_IMAGE_SAMPLER)
                         .withUniform("Depth", UniformType.COMBINED_IMAGE_SAMPLER)
+                        .withUniform("PrevDepth", UniformType.COMBINED_IMAGE_SAMPLER)
                         .withUniform("Hand", UniformType.COMBINED_IMAGE_SAMPLER)
                         .withUniform("History", UniformType.COMBINED_IMAGE_SAMPLER)
                         .withUniform("Taau", UniformType.UNIFORM_BUFFER)

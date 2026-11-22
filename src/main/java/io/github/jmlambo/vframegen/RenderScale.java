@@ -179,6 +179,15 @@ public final class RenderScale {
 
     /** 100% render scale with temporal upscaling: temporal anti-aliasing, in place. */
     private static void resolveNative(GameRenderer gr, RenderTarget main) {
+        try {
+            resolveNativeUnchecked(gr, main);
+        } catch (RuntimeException e) {
+            // The image is left as rendered; the spatial upscalers take over.
+            TemporalUpscaler.disable(e);
+        }
+    }
+
+    private static void resolveNativeUnchecked(GameRenderer gr, RenderTarget main) {
         GpuTexture color = main.getColorTexture();
         if (color == null || main.getColorTextureView() == null) return;
         GpuTextureView out = TemporalUpscaler.resolve(gr, main.getColorTextureView(), color.getFormat(), main.width, main.height);
