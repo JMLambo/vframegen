@@ -8,6 +8,11 @@
 - Sodium integration: a VFrameGen page in Sodium's video settings with the main options (frame generation, upscaling, anti-aliasing, motion blur), and a button to the full settings screen.
 - Anti-aliasing (Quality, off by default): FXAA or SMAA (the reference SMAA by Jorge Jimenez et al., MIT) on the world, before the GUI, so the HUD stays sharp
   and generated frames are built from the smoothed image. Works with or without frame generation.
+- With render scale and shaders off, generated frames used the low-resolution image from before the
+  upscaler, so they were softer than real frames: fine textures such as water flickered between
+  sharp and soft (very visible with the edge-adaptive upscaler). They now use the upscaled image,
+  and the low-resolution one only where the held item was.
+
 ## 0.1.0-alpha.8
 
 - No more oval of moving world in a still frame with shaders off: vanilla's vignette (drawn with the
