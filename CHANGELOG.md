@@ -7,6 +7,8 @@
   their own), so the floor under a mob and walls beside it stay put. Works with shader packs too
   (with Iris the entities are drawn just before its translucent pass). The padded box around each
   entity also no longer reaches below its feet or into blocks beside it.
+- Motion blur no longer smears moving entities the camera follows: each entity's own motion since
+  the previous shown frame is taken out of the blur on the pixels it drew (interpolated mode).
 
 ## 1.0.0-beta.1
 
