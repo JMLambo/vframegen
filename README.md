@@ -157,7 +157,7 @@ anti-aliasing together. Changing any of them by hand shows **Custom**.
 
 | Preset | Frame generation | Render scale | Upscaler | Anti-aliasing | Optical flow |
 |---|---|---|---|---|---|
-| Low-end | adaptive | dynamic | bicubic | FXAA | left as set |
+| Low-end | adaptive | dynamic | bicubic | FXAA | off |
 | Balanced | adaptive | dynamic | edge-adaptive (FSR 1) | SMAA | left as set |
 | Quality | adaptive | 100% | temporal (TAA) | from the temporal upscaler | on |
 

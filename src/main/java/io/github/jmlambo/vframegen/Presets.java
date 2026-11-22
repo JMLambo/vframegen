@@ -4,7 +4,7 @@ package io.github.jmlambo.vframegen;
  * One-click presets: set frame generation, render scale, upscaling and anti-aliasing together.
  * The preset shown is the one the current settings match (CUSTOM when none does), so changing any
  * of these settings by hand turns it to Custom. The target frame rate and motion blur are left
- * alone (they depend on the display and on taste); Quality also turns on optical flow.
+ * alone (they depend on the display and on taste); Quality turns optical flow on, Low-end off.
  */
 public final class Presets {
     public enum Preset { CUSTOM, LOW_END, BALANCED, QUALITY }
@@ -24,6 +24,7 @@ public final class Presets {
                 c.upscaler = FrameGenConfig.Upscaler.BICUBIC; // the cheapest
                 c.antiAliasing = FrameGenConfig.AntiAliasingMode.FXAA;
                 c.antiAliasingQuality = 2;
+                c.opticalFlow = false; // its GPU time goes to the real frames instead
             }
             case BALANCED -> {
                 c.enabled = true;
@@ -43,8 +44,8 @@ public final class Presets {
                 c.upscaler = FrameGenConfig.Upscaler.TEMPORAL; // temporal anti-aliasing at 100%
                 c.antiAliasing = FrameGenConfig.AntiAliasingMode.OFF; // temporal anti-aliases
                 c.antiAliasingQuality = 3;
-                // Generated frames also follow motion depth can't see. Only used where the GPU
-                // supports it; the other presets leave the setting as it is.
+                // Generated frames also follow motion depth can't see. Balanced leaves the setting
+                // as it is.
                 c.opticalFlow = true;
             }
             case CUSTOM -> {

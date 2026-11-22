@@ -14,7 +14,7 @@
   "vframegen.firstRun.title": "VFrameGen is set up",
   "vframegen.firstRun.message": "%s preset, %s fps target, picked for your PC. Change it in Video Settings.",
   "vframegen.config.preset": "Preset",
-  "vframegen.config.preset.tooltip": "Sets frame generation, render scale, upscaling and anti-aliasing together. Changing any of them by hand makes it Custom. The target frame rate and motion blur are left as they are.\nLow-end: dynamic render scale, bicubic upscaling, FXAA. For PCs that struggle to hold the target.\nBalanced: dynamic render scale, SMAA.\nQuality: full resolution with temporal anti-aliasing; frame generation only for smoothness, with optical flow on where the GPU supports it.",
+  "vframegen.config.preset.tooltip": "Sets frame generation, render scale, upscaling and anti-aliasing together. Changing any of them by hand makes it Custom. The target frame rate and motion blur are left as they are.\nLow-end: dynamic render scale, bicubic upscaling, FXAA, optical flow off. For PCs that struggle to hold the target.\nBalanced: dynamic render scale, SMAA.\nQuality: full resolution with temporal anti-aliasing; frame generation only for smoothness, with optical flow on where the GPU supports it.",
   "vframegen.config.preset.custom": "Custom",
   "vframegen.config.preset.low_end": "Low-end",
   "vframegen.config.preset.balanced": "Balanced",
