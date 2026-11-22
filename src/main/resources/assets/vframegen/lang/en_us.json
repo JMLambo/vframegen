@@ -24,7 +24,7 @@
   "vframegen.config.multiplier": "Frame generation",
   "vframegen.config.multiplier.tooltip": "Frames shown per real frame. 2x shows one generated frame per real one, 6x shows five.\nEach extra frame costs a little GPU time but no extra VRAM.\nWith VSync on, real frames are capped at your refresh rate divided by this.",
   "vframegen.config.adaptive": "Adaptive frame generation",
-  "vframegen.config.adaptive.tooltip": "Instead of the fixed multiplier, picks how many frames to show per real frame (1 to 6) to reach the target frame rate, as the real frame rate changes.\nReal frames are capped at the target; when they reach it alone, no frames are generated.",
+  "vframegen.config.adaptive.tooltip": "Instead of the fixed multiplier, picks how many frames to show per real frame (1 to 8, beyond the fixed multiplier's 6) to reach the target frame rate, as the real frame rate changes.\nReal frames are capped at the target; when they reach it alone, no frames are generated.\nThe target is not always reached: every generated frame takes some GPU time, so the real frame rate drops a little as more are made, and when the GPU is already maxed out (a heavy shader pack) adaptive mode settles below the target rather than slowing the game down further.",
   "vframegen.config.targetFps": "Target frame rate",
   "vframegen.config.targetFps.tooltip": "Frames per second to show, real and generated together: the target of adaptive frame generation and of dynamic render scale (which aims for half of it in real frames while frame generation is on). Your display's refresh rate is a good choice.",
   "vframegen.config.mode": "Mode",

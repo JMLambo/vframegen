@@ -43,8 +43,8 @@ import java.nio.LongBuffer;
  * frames go through the swapchain as before.
  */
 public final class PresentQueue {
-    /** Pending buffers: the generated frames of two real frames at the highest multiplier. */
-    public static final int SLOTS = 2 * (FrameGenConfig.MAX_MULTIPLIER - 1);
+    /** Pending buffers: the generated frames of two real frames at the highest (adaptive) multiplier. */
+    public static final int SLOTS = 2 * (FrameGenConfig.ADAPTIVE_MAX_MULTIPLIER - 1);
 
     private static final int VK_SUCCESS = 0;
     private static final int VK_TIMEOUT = 2;

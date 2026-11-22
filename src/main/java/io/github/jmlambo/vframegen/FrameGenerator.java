@@ -872,17 +872,48 @@ public final class FrameGenerator {
      * carried over: 3, 3, 4, 3, ... averages exactly 3.3, and the frame rate shown is the target
      * instead of the next whole multiple above it.
      */
+    // Adaptive mode's ceiling while generated frames are being dropped (drawn, then no swapchain
+    // image when due): each one cost GPU time a real frame could have used and was never shown, so
+    // asking for fewer gives real frames that time back at no loss on screen. Fractional, like the
+    // multiplier itself (3.4x alternates 3 and 4): lowered a tenth while drops happen, raised a
+    // tenth after half a second without any, so it settles just under where drops start.
+    private double dropCeiling = FrameGenConfig.ADAPTIVE_MAX_MULTIPLIER;
+    private long dropCeilingLoweredNs, dropCeilingRaisedNs;
+    private static final double DROP_CEILING_STEP = 0.1;
+    // At most one step down per quarter second (drops come in bursts; per pair it sank far too
+    // fast), one step up per half second without drops.
+    private static final long DROP_CEILING_LOWER_NS = 250_000_000L;
+    private static final long DROP_CEILING_RAISE_NS = 500_000_000L;
+
+    private double adaptiveCeiling() {
+        long now = System.nanoTime();
+        if (PresentThread.takeDropped() > 0) {
+            if (now - dropCeilingLoweredNs > DROP_CEILING_LOWER_NS) {
+                // From the ceiling itself: from the whole multiplier just used, one drop during a
+                // 4 of a 4.6 average went straight to 3.9.
+                dropCeiling = Math.max(2.0, dropCeiling - DROP_CEILING_STEP);
+                dropCeilingLoweredNs = now;
+            }
+            dropCeilingRaisedNs = now;
+        } else if (dropCeiling < FrameGenConfig.ADAPTIVE_MAX_MULTIPLIER && now - dropCeilingRaisedNs > DROP_CEILING_RAISE_NS) {
+            dropCeiling = Math.min(FrameGenConfig.ADAPTIVE_MAX_MULTIPLIER, dropCeiling + DROP_CEILING_STEP);
+            dropCeilingRaisedNs = now;
+        }
+        return dropCeiling;
+    }
+
     private int framesPerReal(long intervalNs) {
         FrameGenConfig cfg = VFrameGen.config();
         if (!cfg.adaptive) return Math.clamp(cfg.multiplier, 2, FrameGenConfig.MAX_MULTIPLIER);
+        double most = adaptiveCeiling();
         if (intervalNs > 0 && intervalNs < 250_000_000L) {
             adaptiveIntervalNs = adaptiveIntervalNs <= 0 ? intervalNs
                     : adaptiveIntervalNs + (intervalNs - adaptiveIntervalNs) * 0.1;
         }
         if (adaptiveIntervalNs <= 0) return adaptiveFrames;
-        double ideal = Math.clamp(cfg.targetFps * adaptiveIntervalNs / 1e9, 1.0, FrameGenConfig.MAX_MULTIPLIER);
+        double ideal = Math.clamp(cfg.targetFps * adaptiveIntervalNs / 1e9, 1.0, most);
         adaptiveCarry += ideal;
-        adaptiveFrames = (int) Math.clamp(Math.floor(adaptiveCarry + 1.0e-6), 1, FrameGenConfig.MAX_MULTIPLIER);
+        adaptiveFrames = (int) Math.clamp(Math.floor(adaptiveCarry + 1.0e-6), 1, (int) Math.ceil(most));
         adaptiveCarry = Math.clamp(adaptiveCarry - adaptiveFrames, 0.0, 1.0);
         return adaptiveFrames;
     }
@@ -891,7 +922,7 @@ public final class FrameGenerator {
     public double adaptiveMultiplier() {
         FrameGenConfig cfg = VFrameGen.config();
         if (!cfg.adaptive || adaptiveIntervalNs <= 0) return 0;
-        return Math.clamp(cfg.targetFps * adaptiveIntervalNs / 1e9, 1.0, FrameGenConfig.MAX_MULTIPLIER);
+        return Math.clamp(cfg.targetFps * adaptiveIntervalNs / 1e9, 1.0, dropCeiling);
     }
 
     /** True while a generated frame is being submitted (see VulkanTransientMemoryMixin). */
@@ -1941,6 +1972,14 @@ public final class FrameGenerator {
             genStartNs = System.nanoTime();
             if (PresentQueue.ready()) {
                 for (int k = 1; k < frames; k++) {
+                    // Keep the queue about one real frame's worth deep. Swapchain images used to cap
+                    // it; without that the render thread ran two or three real frames ahead of the
+                    // screen (input lag, and the game slowed down and caught up in waves). Skipped
+                    // before drawing, so it costs no GPU time.
+                    if (PresentThread.queued() > frames + 1) {
+                        statsSkips.merge("queue-full", frames - k, Integer::sum);
+                        break;
+                    }
                     if (!stageGenerated(mc, k, "present queue")) {
                         statsSkips.merge("no-buffer", frames - k, Integer::sum);
                         break;
@@ -2027,7 +2066,9 @@ public final class FrameGenerator {
                     gpuPassCount == 0 ? "?" : String.format(Locale.ROOT, "%.2f", gpuPassNs / 1e6 / gpuPassCount),
                     String.format(Locale.ROOT, "%.1f", realDoneLagNs / 1e6),
                     String.format(Locale.ROOT, "%.1f", realIntervalNs / 1e6),
-                    (presentThreadActive() ? ", " + PresentThread.stats() : "") + (statsSkips.isEmpty() ? "" : ", skipped " + statsSkips),
+                    (presentThreadActive() ? ", " + PresentThread.stats() : "")
+                            + (VFrameGen.config().adaptive ? String.format(Locale.ROOT, ", adaptive ceiling %.1fx", dropCeiling) : "")
+                            + (statsSkips.isEmpty() ? "" : ", skipped " + statsSkips),
                     broken ? " [disabled after error]" : "");
             statsSkips.clear();
             gapSumMs = 0;

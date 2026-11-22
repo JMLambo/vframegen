@@ -18,12 +18,14 @@ public final class FrameGenConfig {
     public enum AntiAliasingMode { OFF, FXAA, SMAA }
 
     public static final int MAX_MULTIPLIER = 6;
+    /** Adaptive mode may go further than a fixed multiplier, for very low real frame rates. */
+    public static final int ADAPTIVE_MAX_MULTIPLIER = 8;
     /** Vanilla's frame limiter only applies limits below 260 (260 means unlimited). */
     public static final int MAX_TARGET_FPS = 250;
 
     /** The most frames shown per real frame with these settings (sizes the swapchain). */
     public int maxFramesPerReal() {
-        return adaptive ? MAX_MULTIPLIER : Math.clamp(multiplier, 2, MAX_MULTIPLIER);
+        return adaptive ? ADAPTIVE_MAX_MULTIPLIER : Math.clamp(multiplier, 2, MAX_MULTIPLIER);
     }
 
     public boolean enabled = true;
@@ -66,7 +68,7 @@ public final class FrameGenConfig {
             enabled                 generate frames between real frames.
             multiplier              2 to 6: frames shown per real frame (2 = one generated frame per
                                     real one). Costs GPU time per extra frame, no extra VRAM.
-            adaptive                instead of a fixed multiplier, pick frames per real frame (1 to 6)
+            adaptive                instead of a fixed multiplier, pick frames per real frame (1 to 8)
                                     to reach targetFps. Real frames are capped at targetFps.
             targetFps               30 to 250: frames per second shown in adaptive mode.
             disableWhileScreenOpen  only generate while no menu or inventory is open.

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Adaptive frame generation can go up to 8x (fixed multipliers stay at 2x to 6x), for very low
+  real frame rates.
+- Adaptive mode asks for fewer generated frames whenever some get dropped (drawn, but no swapchain
+  image free when due): they cost GPU time and were never shown. The ceiling moves in tenths and
+  recovers within seconds once drops stop.
+- Fixed input lag and the game slowing down and catching up in waves with the present queue: frames
+  could queue two or three real frames deep. The queue is now kept about one real frame deep
+  (generated frames beyond that are not drawn), which also gave real frames their GPU time back.
+- README: "What to expect" (real frame rate cost, adaptive targets, input delay, upscaling with
+  shader packs).
+
 - Generated frames no longer go missing with a GPU-heavy shader pack on Vulkan (NVIDIA): each one
   now takes a swapchain image only when it is due, on a second queue of its own, instead of holding
   one while it waits. Before, with the render thread a frame ahead, the swapchain ran out of images
