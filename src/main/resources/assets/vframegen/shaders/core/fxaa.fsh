@@ -19,10 +19,28 @@ layout(std140) uniform Fxaa {
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
 
-const float EDGE_THRESHOLD = 0.125;      // contrast relative to the brightest neighbour
-const float EDGE_THRESHOLD_MIN = 0.0312; // ignore contrast below this (dark areas)
+// QUALITY (1 low to 4 ultra) comes from the pipeline (the quality setting).
+#if QUALITY <= 1
+const float EDGE_THRESHOLD = 0.25;       // contrast relative to the brightest neighbour
+const float EDGE_THRESHOLD_MIN = 0.0833; // ignore contrast below this (dark areas)
+const float SUBPIXEL_QUALITY = 0.5;
+const int SEARCH_STEPS = 6;
+#elif QUALITY == 2
+const float EDGE_THRESHOLD = 0.166;
+const float EDGE_THRESHOLD_MIN = 0.0625;
+const float SUBPIXEL_QUALITY = 0.75;
+const int SEARCH_STEPS = 9;
+#elif QUALITY == 3
+const float EDGE_THRESHOLD = 0.125;
+const float EDGE_THRESHOLD_MIN = 0.0312;
 const float SUBPIXEL_QUALITY = 0.75;
 const int SEARCH_STEPS = 12;
+#else
+const float EDGE_THRESHOLD = 0.063;
+const float EDGE_THRESHOLD_MIN = 0.0312;
+const float SUBPIXEL_QUALITY = 1.0;
+const int SEARCH_STEPS = 12;
+#endif
 const float STEP_SIZE[12] = float[](1.0, 1.0, 1.0, 1.0, 1.0, 1.5, 2.0, 2.0, 2.0, 2.0, 4.0, 8.0);
 
 float luma(vec3 c) {

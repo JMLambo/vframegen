@@ -114,6 +114,10 @@ final class ClothConfigScreen {
                 .setDefaultValue(def.antiAliasing).setTooltip(tip("antiAliasing"))
                 .setEnumNameProvider(v -> Component.translatable("vframegen.config.antiAliasing." + v.name().toLowerCase(java.util.Locale.ROOT)))
                 .setSaveConsumer(v -> cfg.antiAliasing = v).build());
+        quality.addEntry(e.startIntSlider(t("antiAliasingQuality"), cfg.antiAliasingQuality, 1, 4)
+                .setDefaultValue(def.antiAliasingQuality).setTooltip(tip("antiAliasingQuality"))
+                .setTextGetter(v -> Component.translatable("vframegen.config.antiAliasingQuality." + v))
+                .setSaveConsumer(v -> cfg.antiAliasingQuality = v).build());
         var motionBlur = e.startBooleanToggle(t("motionBlur"), cfg.motionBlur)
                 .setDefaultValue(def.motionBlur).setTooltip(tip("motionBlur"))
                 .setSaveConsumer(v -> cfg.motionBlur = v).build();

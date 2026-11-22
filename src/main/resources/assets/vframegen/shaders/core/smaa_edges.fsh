@@ -12,7 +12,7 @@ layout(std140) uniform Smaa {
 
 #define SMAA_RT_METRICS Metrics
 #define SMAA_GLSL_3
-#define SMAA_PRESET_HIGH
+// SMAA_PRESET_LOW / _MEDIUM / _HIGH / _ULTRA comes from the pipeline (the quality setting).
 #define SMAA_INCLUDE_VS 0
 #define SMAA_INCLUDE_PS 1
 #include <vframegen:smaa.glsl>

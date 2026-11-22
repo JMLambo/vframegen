@@ -40,6 +40,7 @@ public final class FrameGenConfig {
     public float guiDiffThreshold = 0.004f;
     public float sharpness = 0.0f;
     public AntiAliasingMode antiAliasing = AntiAliasingMode.OFF;
+    public int antiAliasingQuality = 3;
     public boolean motionBlur = false;
     public float motionBlurStrength = 0.5f;
     public double renderScale = 1.0;
@@ -83,6 +84,7 @@ public final class FrameGenConfig {
             sharpness               unsharp mask applied to generated frames, 0 = off.
             antiAliasing            OFF, FXAA or SMAA on the world, before the GUI (most shader packs have their own).
                                     FXAA is the cheapest; SMAA keeps edges and textures sharper.
+            antiAliasingQuality     1 (low) to 4 (ultra): higher finds fainter and longer edges, at more GPU time.
             motionBlur              camera motion blur on every frame shown, along that frame's own motion
                                     (turn the shader pack's motion blur off: it ghosts with frame generation).
             motionBlurStrength      0.1 to 1.0: blur length as a fraction of the time between shown frames.
@@ -139,6 +141,7 @@ public final class FrameGenConfig {
                 String aa = props.getProperty("antiAliasing", "").trim();
                 c.antiAliasing = aa.equalsIgnoreCase("true") ? AntiAliasingMode.FXAA : aa.equalsIgnoreCase("false")
                         ? AntiAliasingMode.OFF : enumOf(props, "antiAliasing", c.antiAliasing, AntiAliasingMode.class);
+                c.antiAliasingQuality = (int) Math.clamp(dbl(props, "antiAliasingQuality", c.antiAliasingQuality), 1, 4);
                 c.motionBlur = bool(props, "motionBlur", c.motionBlur);
                 c.motionBlurStrength = (float) Math.clamp(dbl(props, "motionBlurStrength", c.motionBlurStrength), 0.1, 1.0);
                 c.debugTint = bool(props, "debugTint", c.debugTint);
@@ -179,6 +182,7 @@ public final class FrameGenConfig {
         values.put("guiDiffThreshold", Float.toString(guiDiffThreshold));
         values.put("sharpness", Float.toString(sharpness));
         values.put("antiAliasing", antiAliasing.name());
+        values.put("antiAliasingQuality", Integer.toString(antiAliasingQuality));
         values.put("motionBlur", Boolean.toString(motionBlur));
         values.put("motionBlurStrength", Float.toString(motionBlurStrength));
         values.put("debugTint", Boolean.toString(debugTint));
