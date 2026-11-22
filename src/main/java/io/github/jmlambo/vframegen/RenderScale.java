@@ -59,7 +59,7 @@ public final class RenderScale {
 
     public static double scale() {
         if (broken) return 1.0;
-        double s = VFrameGen.config().renderScale;
+        double s = DynamicScale.enabled() ? DynamicScale.current() : VFrameGen.config().renderScale;
         return s >= 0.999 ? 1.0 : Math.max(0.25, s);
     }
 

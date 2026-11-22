@@ -44,6 +44,7 @@ public final class FrameGenConfig {
     public boolean motionBlur = false;
     public float motionBlurStrength = 0.5f;
     public double renderScale = 1.0;
+    public boolean dynamicRenderScale = false;
     public boolean autoCap = true;
     public boolean presentThread = true;
     public boolean allowVsync = false;
@@ -100,6 +101,9 @@ public final class FrameGenConfig {
             renderScale             0.5 to 1.0: the world (and shader pack) renders at this fraction of the
                                     window size and is upscaled; the GUI stays at full resolution.
                                     0.75 shades about 56% of the pixels.
+            dynamicRenderScale      lower the render scale (50% to 100%, renderScale unused) when real frames are
+                                    too slow for targetFps (half of it while frame generation is on, or targetFps /
+                                    multiplier with a fixed multiplier), and raise it again with room to spare.
             upscaler                BICUBIC or EDGE_ADAPTIVE. BICUBIC: Catmull-Rom with contrast-adaptive
                                     sharpening. EDGE_ADAPTIVE: FSR 1 style (EASU + RCAS), sharper
                                     edges without jaggies, a little more GPU time.
@@ -155,6 +159,7 @@ public final class FrameGenConfig {
                 c.allowVsync = bool(props, "allowVsync", c.allowVsync);
                 c.displayHz = Math.max(0, Math.min(500, (int) dbl(props, "displayHz", c.displayHz)));
                 c.renderScale = Math.clamp(dbl(props, "renderScale", c.renderScale), 0.5, 1.0);
+                c.dynamicRenderScale = bool(props, "dynamicRenderScale", c.dynamicRenderScale);
                 c.upscaler = enumOf(props, "upscaler", c.upscaler, Upscaler.class);
                 c.upscaleSharpness = Math.clamp(dbl(props, "upscaleSharpness", c.upscaleSharpness), 0.0, 1.0);
             } catch (IOException | RuntimeException e) {
@@ -196,6 +201,7 @@ public final class FrameGenConfig {
         values.put("allowVsync", Boolean.toString(allowVsync));
         values.put("displayHz", Integer.toString(displayHz));
         values.put("renderScale", Double.toString(renderScale));
+        values.put("dynamicRenderScale", Boolean.toString(dynamicRenderScale));
         values.put("upscaleSharpness", Double.toString(upscaleSharpness));
         values.put("upscaler", upscaler.name());
         StringBuilder out = new StringBuilder();

@@ -44,7 +44,8 @@ public final class SodiumIntegration implements ConfigEntryPoint {
                         .setRange(30, FrameGenConfig.MAX_TARGET_FPS, 1)
                         .setValueFormatter(v -> Component.literal(v + " fps"))
                         .setDefaultValue(def.targetFps).setStorageHandler(storage)
-                        .setEnabledProvider(s -> s.readBooleanOption(id("adaptive")), id("adaptive"))
+                        .setEnabledProvider(s -> s.readBooleanOption(id("adaptive")) || s.readBooleanOption(id("dynamicRenderScale")),
+                                id("adaptive"), id("dynamicRenderScale"))
                         .setBinding(v -> cfg.targetFps = v, () -> cfg.targetFps))
                 .addOption(b.createEnumOption(id("mode"), FrameGenConfig.Mode.class)
                         .setName(t("mode")).setTooltip(tip("mode"))
@@ -54,11 +55,13 @@ public final class SodiumIntegration implements ConfigEntryPoint {
 
         OptionGroupBuilder upscaling = b.createOptionGroup()
                 .setName(t("upscaling"))
+                .addOption(bool(b, storage, "dynamicRenderScale", def.dynamicRenderScale, v -> cfg.dynamicRenderScale = v, () -> cfg.dynamicRenderScale))
                 .addOption(b.createIntegerOption(id("renderScale"))
                         .setName(t("renderScale")).setTooltip(tip("renderScale"))
                         .setRange(50, 100, 1)
                         .setValueFormatter(v -> Component.literal(v + "%"))
                         .setImpact(OptionImpact.HIGH)
+                        .setEnabledProvider(st -> !st.readBooleanOption(id("dynamicRenderScale")), id("dynamicRenderScale"))
                         .setDefaultValue((int) Math.round(def.renderScale * 100)).setStorageHandler(storage)
                         .setBinding(v -> cfg.renderScale = v / 100.0, () -> (int) Math.round(cfg.renderScale * 100)))
                 .addOption(b.createEnumOption(id("upscaler"), FrameGenConfig.Upscaler.class)

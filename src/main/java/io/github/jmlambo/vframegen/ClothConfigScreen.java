@@ -40,9 +40,13 @@ final class ClothConfigScreen {
                 .setRequirement(Requirement.isFalse(adaptive))
                 .setSaveConsumer(v -> cfg.multiplier = v).build());
         general.addEntry(adaptive);
+        // Built here so the shared target frame rate can grey out by it; listed under Upscaling.
+        var dynamic = e.startBooleanToggle(t("dynamicRenderScale"), cfg.dynamicRenderScale)
+                .setDefaultValue(def.dynamicRenderScale).setTooltip(tip("dynamicRenderScale"))
+                .setSaveConsumer(v -> cfg.dynamicRenderScale = v).build();
         general.addEntry(e.startIntSlider(t("targetFps"), cfg.targetFps, 30, FrameGenConfig.MAX_TARGET_FPS)
                 .setDefaultValue(def.targetFps).setTooltip(tip("targetFps"))
-                .setRequirement(Requirement.isTrue(adaptive))
+                .setRequirement(Requirement.any(Requirement.isTrue(adaptive), Requirement.isTrue(dynamic)))
                 .setTextGetter(v -> Component.literal(v + " fps"))
                 .setSaveConsumer(v -> cfg.targetFps = v).build());
         general.addEntry(e.startEnumSelector(t("mode"), FrameGenConfig.Mode.class, cfg.mode)
@@ -77,9 +81,11 @@ final class ClothConfigScreen {
                 .setSaveConsumer(v -> cfg.disableWhileScreenOpen = v).build());
 
         ConfigCategory upscaling = builder.getOrCreateCategory(Component.translatable("vframegen.config.upscaling"));
+        upscaling.addEntry(dynamic);
         upscaling.addEntry(e.startIntSlider(t("renderScale"), (int) Math.round(cfg.renderScale * 100), 50, 100)
                 .setDefaultValue((int) Math.round(def.renderScale * 100)).setTooltip(tip("renderScale"))
                 .setTextGetter(v -> Component.literal(v + "%"))
+                .setRequirement(Requirement.isFalse(dynamic))
                 .setSaveConsumer(v -> cfg.renderScale = v / 100.0).build());
         upscaling.addEntry(e.startEnumSelector(t("upscaler"), FrameGenConfig.Upscaler.class, cfg.upscaler)
                 .setDefaultValue(def.upscaler).setTooltip(tip("upscaler"))

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Dynamic render scale (Upscaling, off by default): lowers the render scale (down to 50%) when real
+  frames are too slow for the target frame rate, and raises it again when there is room, in 5% steps
+  (at most 15% at a time, at most every two seconds). It shares the target frame rate with adaptive
+  frame generation, aiming for half of it in real frames while frame generation is on; the render
+  scale slider is greyed out while it is on.
+
 ## 0.1.0-alpha.9
 
 - Blocks seen through water no longer shake in generated frames (with or without shaders): they were moved by the
