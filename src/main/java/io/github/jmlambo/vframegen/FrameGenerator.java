@@ -1317,7 +1317,7 @@ public final class FrameGenerator {
             double pz = net.minecraft.util.Mth.lerp(pt, e.zo, e.getZ());
             // The box around the entity's position, padded: models (and model mods such as
             // Fresh Animations) reach past the hitbox.
-            net.minecraft.world.phys.AABB box = e.getBoundingBox().move(-e.getX(), -e.getY(), -e.getZ()).inflate(0.35);
+            net.minecraft.world.phys.AABB box = e.getBoundingBox().move(-e.getX(), -e.getY(), -e.getZ()).inflate(0.6, 0.35, 0.6);
             int i = c.entityCount++;
             c.entityIds[i] = e.getId();
             c.entityPos[i * 3] = px;

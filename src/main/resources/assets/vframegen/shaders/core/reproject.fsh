@@ -60,6 +60,7 @@ struct Warp {
     int reason;
     bool hit;      // a real match for this pixel (not a fill, not off screen)
     vec3 still;    // this source's world at the output pixel, not warped
+    bool entity;   // the match is on a moving entity
 };
 
 bool isSky(float d) {
@@ -147,6 +148,7 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
     Warp w;
     w.near = -1.0;
     w.hit = true;
+    w.entity = false;
 
     // GUI / HUD: wherever the GUI changed the image, this source shows the GUI as it was.
     vec3 finalPx = texture(finalTex, uvDst).rgb;
@@ -230,6 +232,14 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
             }
         }
         uvSrc = haveHit ? bestHit : bestMiss;
+        if (haveHit) {
+            float d = texture(depthTex, clamp(uvSrc, 0.0, 1.0)).r;
+            if (!isSky(d)) {
+                float ndcZ = Params2.y > 0.5 ? d : d * 2.0 - 1.0;
+                vec4 p = invViewProj * vec4(uvSrc * 2.0 - 1.0, ndcZ, 1.0);
+                w.entity = abs(p.w) > 1.0e-12 && dot(entityMotion(p.xyz / p.w, fromB), vec3(1.0)) != 0.0;
+            }
+        }
         w.near = haveHit ? bestHitNear : bestMissNear;
         contested = !haveHit || maxHitNear - minHitNear > 1.0e-4;
         w.hit = haveHit;
@@ -323,7 +333,9 @@ void main() {
         if (p.hit) {
             color = p.color;
             reason = p.reason;
-        } else if (o.hit) {
+        } else if (o.hit && !o.entity) {
+            // (Not a moving entity from the other frame: its limbs are in another pose there, and
+            // filling from it showed both sets of legs.)
             color = o.color;
             reason = o.reason;
         } else {
