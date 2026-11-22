@@ -109,7 +109,7 @@ public final class DynamicScale {
         FrameGenConfig cfg = VFrameGen.config();
         double target = cfg.targetFps;
         if (cfg.enabled) target /= cfg.adaptive ? 2.0 : Math.clamp(cfg.multiplier, 2, FrameGenConfig.MAX_MULTIPLIER);
-        return Math.max(10.0, target);
+        return Math.max(1.0, target);
     }
 
     private static void reset(long now) {
