@@ -98,6 +98,9 @@ public final class SodiumIntegration implements ConfigEntryPoint {
                         .setElementNameProvider(v -> enumName("antiAliasing", v))
                         .setImpact(OptionImpact.LOW)
                         .setDefaultValue(def.antiAliasing).setStorageHandler(storage)
+                        // Temporal upscaling anti-aliases on its own.
+                        .setEnabledProvider(s -> s.readEnumOption(id("upscaler"), FrameGenConfig.Upscaler.class)
+                                != FrameGenConfig.Upscaler.TEMPORAL, id("upscaler"))
                         .setBinding(v -> cfg.antiAliasing = v, () -> cfg.antiAliasing))
                 .addOption(b.createIntegerOption(id("antiAliasingQuality"))
                         .setName(t("antiAliasingQuality")).setTooltip(tip("antiAliasingQuality"))
@@ -105,7 +108,9 @@ public final class SodiumIntegration implements ConfigEntryPoint {
                         .setValueFormatter(v -> Component.translatable("vframegen.config.antiAliasingQuality." + v))
                         .setDefaultValue(def.antiAliasingQuality).setStorageHandler(storage)
                         .setEnabledProvider(s -> s.readEnumOption(id("antiAliasing"), FrameGenConfig.AntiAliasingMode.class)
-                                != FrameGenConfig.AntiAliasingMode.OFF, id("antiAliasing"))
+                                != FrameGenConfig.AntiAliasingMode.OFF
+                                && s.readEnumOption(id("upscaler"), FrameGenConfig.Upscaler.class) != FrameGenConfig.Upscaler.TEMPORAL,
+                                id("antiAliasing"), id("upscaler"))
                         .setBinding(v -> cfg.antiAliasingQuality = v, () -> cfg.antiAliasingQuality))
                 .addOption(bool(b, storage, "motionBlur", def.motionBlur, v -> cfg.motionBlur = v, () -> cfg.motionBlur))
                 .addOption(b.createIntegerOption(id("motionBlurStrength"))
