@@ -27,8 +27,8 @@ pacing.
 > **Integrated graphics:** recommended to use only **upscaling and anti-aliasing** (render scale
 > below 100%, an upscaler, and FXAA or SMAA) when playing on integrated graphics, with frame
 > generation off. (If your PC doesn't have a dedicated graphics card, this applies to you.) There,
-> a generated frame costs almost as much as a real one, so frame generation lowers your real frame
-> rate more than it adds.
+> a generated frame costs almost as much as a real one, so frame generation trades real frames for
+> generated ones: the picture looks a little smoother, but the game responds worse.
 
 ## Installing
 

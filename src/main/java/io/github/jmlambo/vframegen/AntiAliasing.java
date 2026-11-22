@@ -58,7 +58,13 @@ public final class AntiAliasing {
     public static void apply(GameRenderer gr) {
         FrameGenConfig.AntiAliasingMode mode = VFrameGen.config().antiAliasing;
         // Free SMAA's two screen-sized targets when it is not in use.
-        if (mode != FrameGenConfig.AntiAliasingMode.SMAA) closeSmaaTargets();
+        if (mode != FrameGenConfig.AntiAliasingMode.SMAA) {
+            // Both banks: the real frames' and the generated frames' (swapped in for a moment).
+            closeSmaaTargets();
+            swapTargets();
+            closeSmaaTargets();
+            swapTargets();
+        }
         if (broken || mode == FrameGenConfig.AntiAliasingMode.OFF) return;
         // Temporal upscaling already anti-aliased this frame.
         if (TemporalUpscaler.ranThisFrame()) return;
