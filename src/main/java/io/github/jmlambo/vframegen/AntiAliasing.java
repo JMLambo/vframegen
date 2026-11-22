@@ -60,6 +60,8 @@ public final class AntiAliasing {
         // Free SMAA's two screen-sized targets when it is not in use.
         if (mode != FrameGenConfig.AntiAliasingMode.SMAA) closeSmaaTargets();
         if (broken || mode == FrameGenConfig.AntiAliasingMode.OFF) return;
+        // Temporal upscaling already anti-aliased this frame.
+        if (TemporalUpscaler.ranThisFrame()) return;
         // Until the first resource reload is done, mod shaders can't load.
         if (RenderSystemAccessor.vframegen$getCurrentPipelineCache() == null) return;
         RenderTarget main = gr.mainRenderTarget();

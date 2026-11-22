@@ -6,6 +6,7 @@ import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.renderpearl.api.commands.RenderPass;
 import io.github.jmlambo.vframegen.FrameGenerator;
+import io.github.jmlambo.vframegen.TemporalUpscaler;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.LevelTargetBundle;
@@ -44,6 +45,34 @@ public abstract class LevelRendererMixin {
     // The call itself, so other mods' wrappers around it still run (once, with the new pass).
     @Unique
     private Operation<Void> vframegen$deferredCall;
+
+    @Shadow
+    private com.mojang.renderpearl.api.textures.GpuSampler chunkLayerSampler;
+
+    // The terrain sampler: made with temporal upscaling's mip bias (lower-resolution rendering
+    // would otherwise pick blurrier mip levels, and the history could not get the detail back).
+    @WrapOperation(method = "lambda$addMainPass$0", require = 0, at = @At(value = "INVOKE",
+            target = "Lcom/mojang/renderpearl/api/device/GpuDevice;createSampler(Lcom/mojang/renderpearl/api/textures/AddressMode;Lcom/mojang/renderpearl/api/textures/AddressMode;Lcom/mojang/renderpearl/api/textures/FilterMode;Lcom/mojang/renderpearl/api/textures/FilterMode;ILjava/util/OptionalDouble;)Lcom/mojang/renderpearl/api/textures/GpuSampler;"))
+    private com.mojang.renderpearl.api.textures.GpuSampler vframegen$biasedTerrainSampler(
+            com.mojang.renderpearl.api.device.GpuDevice device, com.mojang.renderpearl.api.textures.AddressMode u,
+            com.mojang.renderpearl.api.textures.AddressMode v, com.mojang.renderpearl.api.textures.FilterMode min,
+            com.mojang.renderpearl.api.textures.FilterMode mag, int anisotropy, java.util.OptionalDouble maxLod,
+            Operation<com.mojang.renderpearl.api.textures.GpuSampler> original) {
+        TemporalUpscaler.beginTerrainSampler();
+        try {
+            return original.call(device, u, v, min, mag, anisotropy, maxLod);
+        } finally {
+            TemporalUpscaler.endTerrainSampler();
+        }
+    }
+
+    @Inject(method = "lambda$addMainPass$0", at = @At("HEAD"), require = 0)
+    private void vframegen$resetTerrainSampler(CallbackInfo ci) {
+        if (TemporalUpscaler.terrainSamplerStale() && chunkLayerSampler != null) {
+            chunkLayerSampler.close();
+            chunkLayerSampler = null;
+        }
+    }
 
     @Inject(method = "executeOit", at = @At("HEAD"), require = 0)
     private void vframegen$depthBeforeOit(CallbackInfo ci) {
