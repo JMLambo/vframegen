@@ -55,7 +55,7 @@ layout(std140) uniform FrameGen {
     vec4 EntB[128];
     mat4 AToB;      // position relative to A's camera -> B clip (optical flow)
     mat4 BToA;      // position relative to B's camera -> A clip
-    vec4 FlowParams; // x: optical flow on, y: trusted forward/backward disagreement (uv^2), zw: snorm -> uv
+    vec4 FlowParams; // x: optical flow on, y: trusted forward/backward disagreement (pixels^2), zw: snorm -> uv
     vec4 FlowLimits; // x: smallest residual used (pixels), y: largest
 };
 
@@ -125,6 +125,8 @@ bool drawnByEntity(vec2 uv, float d, bool fromB) {
     return abs(texture(TerrainA, uv).r - d) > 1.0e-7;
 }
 
+bool offscreen(vec2 uv);
+
 #ifdef INTERPOLATE
 // Motion the depth warp cannot see (limbs, particles, water, animated textures), from the hardware
 // optical flow: where the flow says this source pixel is in the other frame, minus where depth
@@ -133,9 +135,12 @@ bool drawnByEntity(vec2 uv, float d, bool fromB) {
 vec2 flowResidual(vec2 uvSrc, vec3 pos, bool byEntity, bool fromB) {
     if (FlowParams.x < 0.5) return vec2(0.0);
     vec2 f = (fromB ? texture(FlowB, uvSrc).rg : texture(FlowA, uvSrc).rg) * FlowParams.zw;
+    // Off the image the reverse lookup would read an edge texel instead: not verifiable.
+    if (offscreen(uvSrc + f)) return vec2(0.0);
     vec2 back = (fromB ? texture(FlowA, uvSrc + f).rg : texture(FlowB, uvSrc + f).rg) * FlowParams.zw;
-    vec2 err = f + back;
-    if (dot(err, err) > FlowParams.y) return vec2(0.0);
+    // Disagreement in pixels of the measured image (FlowParams.zw is snorm -> uv per axis).
+    vec2 errPx = (f + back) / FlowParams.zw * (32767.0 / 32.0);
+    if (dot(errPx, errPx) > FlowParams.y) return vec2(0.0);
     // Entity root motion to the output frame covers a fraction of the step; over the whole step:
     float frac = fromB ? 1.0 - Mix.x : Mix.x;
     vec3 moved = byEntity ? pos + entityMotion(pos, fromB) / max(frac, 1.0e-3) : pos;

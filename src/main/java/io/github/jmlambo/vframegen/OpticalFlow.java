@@ -77,6 +77,7 @@ public final class OpticalFlow {
     private static VkQueue queue;
     private static long commandPool;
     private static VkCommandBuffer[] commands;
+    private static long[] commandDone; // per command buffer: the timeline value its last measurement signals
     private static int nextCommand;
     private static long timeline;
     private static long timelineValue;
@@ -107,7 +108,6 @@ public final class OpticalFlow {
     // Generated frames of a pair may still be drawn after the next real frame was measured.
     private static final Pair[] pairs = {new Pair(), new Pair(), new Pair()};
     private static int nextPair;
-    private static Pair latest;
     private static Pair pending; // measured, not copied out yet (the next measurement overwrites the images)
     private static GpuTexture lastWorld;
     private static boolean layoutsSet;
@@ -126,13 +126,6 @@ public final class OpticalFlow {
     /** Whether the GPU has hardware optical flow and it was enabled. */
     public static boolean available() {
         return queue != null && !failed;
-    }
-
-    /** The last measured flow (forward), for F8, or null. */
-    public static GpuTexture result() {
-        if (latest == null || !latest.valid) return null;
-        copyOut(latest);
-        return latest.copied ? latest.forward : null;
     }
 
     /** The flow measured between these two world images (FrameSlot.noHand), or null. */
@@ -167,6 +160,16 @@ public final class OpticalFlow {
             gridSizes = props.supportedOutputGridSizes();
             inputFormats = formats(dev, NVOpticalFlow.VK_OPTICAL_FLOW_USAGE_INPUT_BIT_NV, stack);
             outputFormats = formats(dev, NVOpticalFlow.VK_OPTICAL_FLOW_USAGE_OUTPUT_BIT_NV, stack);
+            LOGGER.info("Hardware optical flow: family {} index {}, {}x{} to {}x{}, output grids {}, bidirectional {}, "
+                            + "input formats {}, output formats {}", family, index, minWidth, minHeight, maxWidth, maxHeight,
+                    grids(gridSizes), props.bidirectionalFlowSupported(), inputFormats, outputFormats);
+            // Checked before anything is allocated: without them the option is not offered at all.
+            if (!inputFormats.contains(FORMAT_INPUT) || !outputFormats.contains(NVOpticalFlow.VK_FORMAT_R16G16_S10_5_NV)
+                    || (gridSizes & NVOpticalFlow.VK_OPTICAL_FLOW_GRID_SIZE_4X4_BIT_NV) == 0
+                    || !props.bidirectionalFlowSupported()) {
+                LOGGER.info("Hardware optical flow: formats, grid size or both-direction flow not supported, not used");
+                return;
+            }
 
             LongBuffer handle = stack.mallocLong(1);
             VkCommandPoolCreateInfo pool = VkCommandPoolCreateInfo.calloc(stack).sType$Default()
@@ -179,20 +182,13 @@ public final class OpticalFlow {
             check(VK12.vkAllocateCommandBuffers(dev, VkCommandBufferAllocateInfo.calloc(stack).sType$Default()
                     .commandPool(commandPool).level(0).commandBufferCount(commands.length), buffers), "command buffers");
             for (int i = 0; i < commands.length; i++) commands[i] = new VkCommandBuffer(buffers.get(i), dev);
+            commandDone = new long[commands.length];
             VkSemaphoreTypeCreateInfo type = VkSemaphoreTypeCreateInfo.calloc(stack).sType$Default().semaphoreType(1).initialValue(0);
             check(VK12.vkCreateSemaphore(dev, VkSemaphoreCreateInfo.calloc(stack).sType$Default().pNext(type.address()), null, handle), "timeline");
             timeline = handle.get(0);
 
             device = dev;
             queue = q;
-            LOGGER.info("Hardware optical flow: family {} index {}, {}x{} to {}x{}, output grids {}, bidirectional {}, "
-                            + "input formats {}, output formats {}", family, index, minWidth, minHeight, maxWidth, maxHeight,
-                    grids(gridSizes), props.bidirectionalFlowSupported(), inputFormats, outputFormats);
-            if (!inputFormats.contains(FORMAT_INPUT) || !outputFormats.contains(NVOpticalFlow.VK_FORMAT_R16G16_S10_5_NV)
-                    || (gridSizes & NVOpticalFlow.VK_OPTICAL_FLOW_GRID_SIZE_4X4_BIT_NV) == 0) {
-                LOGGER.info("Hardware optical flow: formats or grid size not supported, not used");
-                failed = true;
-            }
         } catch (Throwable t) {
             LOGGER.warn("Hardware optical flow unavailable", t);
             queue = null;
@@ -209,7 +205,11 @@ public final class OpticalFlow {
         if (w < minWidth || h < minHeight || w > maxWidth || h > maxHeight) return;
         try (MemoryStack stack = MemoryStack.stackPush()) {
             if (w != width || h != height || flow == 0) {
-                destroyImages();
+                if (!destroyImages()) {
+                    LOGGER.warn("Hardware optical flow: the GPU did not finish within a second, turned off");
+                    failed = true;
+                    return;
+                }
                 createImages(w, h, stack);
             }
             // The images are about to be measured into again: keep what is still in them.
@@ -252,11 +252,15 @@ public final class OpticalFlow {
             }
 
             // Optical-flow queue: measure input[next] against the previous frame.
-            VkCommandBuffer of = commands[nextCommand];
-            nextCommand = (nextCommand + 1) % commands.length;
-            // This buffer was last submitted commands.length measurements ago; wait until it finished.
-            long earlier = timelineValue - 3L * commands.length;
-            if (earlier > 0) waitTimeline(earlier, stack);
+            int slot = nextCommand;
+            VkCommandBuffer of = commands[slot];
+            // Reused only once its last measurement has finished (a pending buffer can't be reset).
+            if (commandDone[slot] > 0 && !waitTimeline(commandDone[slot], stack)) {
+                LOGGER.warn("Hardware optical flow: the GPU did not finish a measurement within a second, turned off");
+                failed = true;
+                return;
+            }
+            nextCommand = (slot + 1) % commands.length;
             VK12.vkResetCommandBuffer(of, 0);
             VK12.vkBeginCommandBuffer(of, VkCommandBufferBeginInfo.calloc(stack).sType$Default().flags(0x1));
             VulkanCommandEncoder.memoryBarrier(of, stack);
@@ -272,7 +276,14 @@ public final class OpticalFlow {
             cmds.get(0).sType$Default().commandBuffer(of);
             VkSubmitInfo2.Buffer submit = VkSubmitInfo2.calloc(1, stack);
             submit.get(0).sType$Default().pWaitSemaphoreInfos(wait).pCommandBufferInfos(cmds).pSignalSemaphoreInfos(signal);
-            check(KHRSynchronization2.vkQueueSubmit2KHR(queue, submit, 0L), "optical flow submit");
+            // Every queue submit goes under the present thread's lock (repository rule).
+            PresentThread.LOCK.lock();
+            try {
+                check(KHRSynchronization2.vkQueueSubmit2KHR(queue, submit, 0L), "optical flow submit");
+            } finally {
+                PresentThread.LOCK.unlock();
+            }
+            commandDone[slot] = measured;
             current = next;
 
             // Game queue: wait for the measurement and copy the flows into the game's textures.
@@ -300,7 +311,6 @@ public final class OpticalFlow {
             pair.older = older;
             pair.newer = world;
             pair.valid = older != null;
-            latest = pair;
         } catch (Throwable t) {
             LOGGER.warn("Hardware optical flow failed, turned off", t);
             failed = true;
@@ -431,13 +441,17 @@ public final class OpticalFlow {
         return handle.get(0);
     }
 
-    private static void destroyImages() {
-        if (device == null) return;
+    /**
+     * Frees the images and sessions once the GPU is done with them. False (nothing freed) when it
+     * did not finish within a second: then they may still be in use, and are left alone.
+     */
+    private static boolean destroyImages() {
+        if (device == null) return true;
         if (timelineValue > 0) {
             // The last signals may still be waiting for the game's next submission: submit now.
             RenderSystem.getDevice().createCommandEncoder().submit();
             try (MemoryStack stack = MemoryStack.stackPush()) {
-                waitTimeline(timelineValue, stack);
+                if (!waitTimeline(timelineValue, stack)) return false;
             }
         }
         for (int i = 0; i < 2; i++) {
@@ -458,14 +472,14 @@ public final class OpticalFlow {
         flow = flowMemory = backFlow = backFlowMemory = 0;
         for (Pair p : pairs) p.valid = false; // the textures are kept (resized when next used)
         pending = null;
-        latest = null;
+        return true;
     }
 
-    /** Waits (up to a second) until the GPU has reached value on the timeline. */
-    private static void waitTimeline(long value, MemoryStack stack) {
+    /** Waits (up to a second) until the GPU has reached value on the timeline; false if it did not. */
+    private static boolean waitTimeline(long value, MemoryStack stack) {
         VkSemaphoreWaitInfo info = VkSemaphoreWaitInfo.calloc(stack).sType$Default()
                 .semaphoreCount(1).pSemaphores(stack.longs(timeline)).pValues(stack.longs(value));
-        VK12.vkWaitSemaphores(device, info, 1_000_000_000L);
+        return VK12.vkWaitSemaphores(device, info, 1_000_000_000L) == 0;
     }
 
     private static void barrier(VkCommandBuffer cb, MemoryStack stack, long image, int oldLayout) {
@@ -483,10 +497,11 @@ public final class OpticalFlow {
     private static List<Integer> formats(VkDevice device, int usage, MemoryStack stack) {
         VkOpticalFlowImageFormatInfoNV info = VkOpticalFlowImageFormatInfoNV.calloc(stack).sType$Default().usage(usage);
         IntBuffer count = stack.mallocInt(1);
-        NVOpticalFlow.vkGetPhysicalDeviceOpticalFlowImageFormatsNV(device.getPhysicalDevice(), info, count, null);
+        // A failed query (or VK_INCOMPLETE) gives no formats: optical flow then stays off.
+        if (NVOpticalFlow.vkGetPhysicalDeviceOpticalFlowImageFormatsNV(device.getPhysicalDevice(), info, count, null) != 0) return List.of();
         VkOpticalFlowImageFormatPropertiesNV.Buffer out = VkOpticalFlowImageFormatPropertiesNV.calloc(count.get(0), stack);
         for (VkOpticalFlowImageFormatPropertiesNV f : out) f.sType$Default();
-        NVOpticalFlow.vkGetPhysicalDeviceOpticalFlowImageFormatsNV(device.getPhysicalDevice(), info, count, out);
+        if (NVOpticalFlow.vkGetPhysicalDeviceOpticalFlowImageFormatsNV(device.getPhysicalDevice(), info, count, out) != 0) return List.of();
         List<Integer> list = new ArrayList<>();
         for (int i = 0; i < count.get(0); i++) list.add(out.get(i).format());
         return List.copyOf(list);

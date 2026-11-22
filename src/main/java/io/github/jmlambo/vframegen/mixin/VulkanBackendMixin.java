@@ -51,11 +51,14 @@ public abstract class VulkanBackendMixin {
                 OpticalFlow.enabled(plan.vframegen$flowFamily(), plan.vframegen$flowIndex(), plan.vframegen$graphicsFamily());
                 return result;
             }
-            // The driver refused; fall back to the game's own device so the game still starts.
-            OpticalFlow.LOGGER.warn("Device creation with optical flow failed ({}), retrying without it", result);
+            // The driver refused (the feature and extension were checked, so this should not
+            // happen): create the game's own device so the game still starts. Directly, not through
+            // original again, so whatever else wraps this call does not run twice. The planned extra
+            // queue stays in the create info; it is harmless without the extension.
+            OpticalFlow.LOGGER.warn("Device creation with optical flow failed ({}), creating it without", result);
             info.pNext(features.pNext());
             info.ppEnabledExtensionNames(old);
-            // The planned extra queue stays in the create info; it is harmless without the extension.
+            return org.lwjgl.vulkan.VK12.vkCreateDevice(physical, info, allocator, device);
         }
         return original.call(physical, info, allocator, device);
     }

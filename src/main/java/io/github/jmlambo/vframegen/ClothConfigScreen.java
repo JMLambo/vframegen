@@ -142,12 +142,12 @@ final class ClothConfigScreen {
                 .setTextGetter(v -> Component.literal(v + "%"))
                 .setRequirement(Requirement.isTrue(motionBlur))
                 .setSaveConsumer(v -> cfg.motionBlurStrength = v / 100f).build());
-        if (OpticalFlow.available()) {
-            // Only on GPUs with hardware optical flow (NVIDIA RTX 20 and newer, on Vulkan).
-            quality.addEntry(e.startBooleanToggle(t("opticalFlow"), cfg.opticalFlow)
-                    .setDefaultValue(def.opticalFlow).setTooltip(tip("opticalFlow"))
-                    .setSaveConsumer(v -> cfg.opticalFlow = v).build());
-        }
+        // Greyed out unless the GPU has hardware optical flow (NVIDIA RTX 20 and newer, on Vulkan).
+        quality.addEntry(e.startBooleanToggle(t("opticalFlow"), cfg.opticalFlow)
+                .setDefaultValue(def.opticalFlow)
+                .setTooltip(OpticalFlow.available() ? tip("opticalFlow") : tip("opticalFlow.unsupported"))
+                .setRequirement(OpticalFlow::available)
+                .setSaveConsumer(v -> cfg.opticalFlow = v).build());
         quality.addEntry(e.startFloatField(t("guiDiffThreshold"), cfg.guiDiffThreshold)
                 .setDefaultValue(def.guiDiffThreshold).setMin(0).setMax(0.5f).setTooltip(tip("guiDiffThreshold"))
                 .setSaveConsumer(v -> cfg.guiDiffThreshold = v).build());

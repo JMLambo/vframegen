@@ -63,6 +63,7 @@
   "vframegen.config.antiAliasing.smaa": "SMAA",
   "vframegen.config.opticalFlow": "Hardware optical flow (NVIDIA, beta)",
   "vframegen.config.opticalFlow.tooltip": "Beta: still being tested, especially on RTX 20 and 30 series cards. Uses your GPU's optical flow hardware to measure how the picture moved between real frames. Generated frames then also follow what depth alone can't predict: mob limbs, fire, particles, water and animated textures. Interpolated mode only. Costs about a quarter of a millisecond per frame.",
+  "vframegen.config.opticalFlow.unsupported.tooltip": "Not available on this GPU. Needs an NVIDIA RTX card (20 series or newer) and the Vulkan renderer; other GPUs use depth only.",
   "vframegen.config.motionBlur": "Motion blur",
   "vframegen.packBlur.title": "Shader pack motion blur is on",
   "vframegen.packBlur.message": "It ghosts with frame generation. Turn it off in the pack's settings and use VFrameGen's Motion blur (Quality).",

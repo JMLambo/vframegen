@@ -7,7 +7,7 @@
   depth reprojection cannot see (mob limbs, fire, particles, water, animated textures). Camera and
   whole-entity motion still come from depth; the flow is used only where both directions agree and
   it differs from depth by more than a couple of pixels. On by default where supported (setting
-  "Hardware optical flow", shown only on those GPUs); interpolated mode only. About 0.25 ms of
+  "Hardware optical flow", greyed out on other GPUs); interpolated mode only. About 0.25 ms of
   render-thread time per real frame. Beta: tested on an RTX 4050 only so far; turn it off if
   generated frames look wrong.
 - Adaptive frame generation can go up to 8x (fixed multipliers stay at 2x to 6x), for very low

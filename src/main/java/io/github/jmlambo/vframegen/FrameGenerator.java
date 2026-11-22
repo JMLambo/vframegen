@@ -499,6 +499,7 @@ public final class FrameGenerator {
                         frames, realIntervalNs / 1e6, (genStartNs - lastRealPresentNs) / 1e6,
                         (held.extractNs - shown.extractNs) / 1e6, Compat.irisShadersActive()));
                 DebugCapture.save(shown.finalImage, "0-real-A");
+                saveCapturedFlow();
             }
             if (VFrameGen.config().debugFrameLog) DebugCapture.sequenceNote(String.format(Locale.ROOT, "previous real frame on screen %.2f ms after present(), interval %.2f ms",
                     (genStartNs - lastRealPresentNs) / 1e6, realIntervalNs / 1e6));
@@ -1028,10 +1029,15 @@ public final class FrameGenerator {
         out.rotation(rot).setTranslation(ta.lerp(tb, t));
     }
 
+    /** F8: the optical flow of the captured pair (A to B), the one its generated frames use, if measured. */
+    private void saveCapturedFlow() {
+        OpticalFlow.Pair pair = OpticalFlow.forPair(shown.noHand, held.noHand);
+        if (pair != null) DebugCapture.save(pair.forward, "9-optical-flow");
+    }
+
     private void endCapture(FrameSlot nowShowing) {
         if (!capture) return;
         if (nowShowing != null) DebugCapture.save(nowShowing.finalImage, "9-real-B");
-        if (OpticalFlow.result() != null) DebugCapture.save(OpticalFlow.result(), "9-optical-flow");
         DebugCapture.writeLog(captureLog.toString());
         DebugCapture.end();
         capture = false;
@@ -1239,8 +1245,7 @@ public final class FrameGenerator {
             ub.putMat4f(otherViewProj(a, bb)).putMat4f(otherViewProj(bb, a));
             float fw = OpticalFlow.SNORM_TO_PIXELS / a.noHand.getWidth(0), fh = OpticalFlow.SNORM_TO_PIXELS / a.noHand.getHeight(0);
             // Forward and backward flow may disagree by a pixel (of the measured image) and still be trusted.
-            float trust = 1f / a.noHand.getWidth(0);
-            ub.putVec4(flow != null ? 1f : 0f, trust * trust, fw, fh);
+            ub.putVec4(flow != null ? 1f : 0f, 1f, fw, fh);
             // Measured with the camera turning and nothing else moving: below 2.5 pixels (or with the two
             // directions more than a pixel apart) the flow moved 1-7% of the screen that depth already
             // had right; above it, 0.05%, while burning mobs' fire was still followed.
@@ -1998,6 +2003,7 @@ public final class FrameGenerator {
                 captureLog.append(String.format(Locale.ROOT, "mode=interpolated (present thread) multiplier=%d A->B ms=%.2f iris=%s%n",
                         frames, (held.extractNs - shown.extractNs) / 1e6, Compat.irisShadersActive()));
                 DebugCapture.save(shown.finalImage, "0-real-A");
+                saveCapturedFlow();
             }
             genStartNs = System.nanoTime();
             if (PresentQueue.ready()) {

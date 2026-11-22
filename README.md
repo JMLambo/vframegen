@@ -127,7 +127,7 @@ Frame generation makes motion smoother; it does not make the game itself run fas
 - **NVIDIA RTX cards follow more motion (beta).** On RTX 20 series and newer (Vulkan), the GPU's optical
   flow hardware also tracks what depth alone can't: mob limbs, fire, particles, water and animated
   textures. It is in beta: if generated frames look wrong, turn off **Hardware optical flow** and
-  please report it. Other GPUs use depth only (an experimental option for AMD and Intel is planned).
+  please report it. On other GPUs the setting is greyed out and frames use depth only (an experimental option for AMD and Intel is planned).
 - **Fast turns can show artifacts at low real frame rates.** The lower the real frame rate, the
   further each generated frame has to guess between two real ones. Above about 40 real fps it is
   hard to notice.

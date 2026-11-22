@@ -106,10 +106,20 @@ public abstract class VulkanPhysicalDeviceMixin implements PresentQueuePlan {
         // The list is too big for the LWJGL stack (about 260 bytes per extension), so it goes on the heap.
         try (MemoryStack stack = MemoryStack.stackPush();
              org.lwjgl.vulkan.VkExtensionProperties.Buffer exts = vframegen$extensions(stack)) {
+            if (exts == null) return; // the query failed: no optical flow
             for (org.lwjgl.vulkan.VkExtensionProperties e : exts) available.add(e.extensionNameString());
         }
         String flow = org.lwjgl.vulkan.NVOpticalFlow.VK_NV_OPTICAL_FLOW_EXTENSION_NAME;
         if (!available.contains(flow)) return;
+        // The extension being listed does not mean the feature is there: ask for it.
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            org.lwjgl.vulkan.VkPhysicalDeviceOpticalFlowFeaturesNV feature =
+                    org.lwjgl.vulkan.VkPhysicalDeviceOpticalFlowFeaturesNV.calloc(stack).sType$Default();
+            org.lwjgl.vulkan.VkPhysicalDeviceFeatures2 features =
+                    org.lwjgl.vulkan.VkPhysicalDeviceFeatures2.calloc(stack).sType$Default().pNext(feature.address());
+            org.lwjgl.vulkan.VK11.vkGetPhysicalDeviceFeatures2(vkPhysicalDevice, features);
+            if (!feature.opticalFlow()) return;
+        }
         int family = -1;
         try (MemoryStack stack = MemoryStack.stackPush()) {
             IntBuffer count = stack.mallocInt(1);
@@ -139,12 +149,19 @@ public abstract class VulkanPhysicalDeviceMixin implements PresentQueuePlan {
         vframegen$flowExtensions = java.util.List.copyOf(extensions);
     }
 
+    /** The device's extensions (heap memory, caller frees), or null when the query failed. */
     @org.spongepowered.asm.mixin.Unique
     private org.lwjgl.vulkan.VkExtensionProperties.Buffer vframegen$extensions(MemoryStack stack) {
         IntBuffer count = stack.mallocInt(1);
-        VK12.vkEnumerateDeviceExtensionProperties(vkPhysicalDevice, (java.nio.ByteBuffer) null, count, null);
-        org.lwjgl.vulkan.VkExtensionProperties.Buffer exts = org.lwjgl.vulkan.VkExtensionProperties.calloc(count.get(0));
-        VK12.vkEnumerateDeviceExtensionProperties(vkPhysicalDevice, (java.nio.ByteBuffer) null, count, exts);
-        return exts;
+        // VK_INCOMPLETE (the list grew between the two calls) is retried a few times.
+        for (int attempt = 0; attempt < 3; attempt++) {
+            if (VK12.vkEnumerateDeviceExtensionProperties(vkPhysicalDevice, (java.nio.ByteBuffer) null, count, null) != 0) return null;
+            org.lwjgl.vulkan.VkExtensionProperties.Buffer exts = org.lwjgl.vulkan.VkExtensionProperties.calloc(count.get(0));
+            int result = VK12.vkEnumerateDeviceExtensionProperties(vkPhysicalDevice, (java.nio.ByteBuffer) null, count, exts);
+            if (result == 0) return exts;
+            exts.free();
+            if (result != 5) return null; // VK_INCOMPLETE
+        }
+        return null;
     }
 }
