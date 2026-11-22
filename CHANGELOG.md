@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.0.0-beta.1
+
+First beta: all planned features are in.
+
 - Moving entities in generated frames: mobs, players, boats and minecarts now move with their own
   motion between real frames instead of only the camera's (they used to jump to the next real frame's
   position, a stutter). Root motion of the 32 nearest entities, from their bounding boxes, so it works
