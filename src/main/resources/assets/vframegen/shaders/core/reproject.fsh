@@ -365,45 +365,69 @@ vec3 debugColor(vec3 color, int reason) {
     return mix(vec3(lum * 0.6), tint, reason == R_HIT ? 0.0 : reason == R_FLOW ? 0.7 : 0.55);
 }
 
+bool isFixed(int reason) {
+    return reason == R_GUI || reason == R_HAND || reason == R_LOCKED;
+}
+
+// Whether a source keeps this pixel as it is (GUI or held item): warp()'s first checks, without
+// its search.
+bool fixedAt(vec2 uvDst, sampler2D world, sampler2D mask, sampler2D finalTex, vec4 flags) {
+    vec3 diff = abs(texture(finalTex, uvDst).rgb - texture(world, uvDst).rgb);
+    if (max(diff.r, max(diff.g, diff.b)) > Params.x) return true;
+    vec2 m = texture(mask, uvDst).rg;
+    return (flags.x > 0.5 && m.r > 0.5) || (flags.y > 0.5 && m.g > 0.5);
+}
+
+Warp warpA(vec2 uvDst) {
+    return warp(uvDst, WorldA, DepthA, MaskA, NoHandA, FinalA, AInvViewProj, ADstViewProj, AViewProjRot, AFlags, false);
+}
+
+#ifdef INTERPOLATE
+Warp warpB(vec2 uvDst) {
+    return warp(uvDst, WorldB, DepthB, MaskB, NoHandB, FinalB, BInvViewProj, BDstViewProj, BViewProjRot, BFlags, true);
+}
+#endif
+
 void main() {
     vec2 uvDst = texCoord;
+#ifndef INTERPOLATE
     Warp a = warp(uvDst, WorldA, DepthA, MaskA, NoHandA, FinalA, AInvViewProj, ADstViewProj, AViewProjRot, AFlags, false);
     vec3 color = a.color;
     int reason = a.reason;
-
-#ifdef INTERPOLATE
-    Warp b = warp(uvDst, WorldB, DepthB, MaskB, NoHandB, FinalB, BInvViewProj, BDstViewProj, BViewProjRot, BFlags, true);
+#else
+    vec3 color;
+    int reason;
+    // One frame builds the picture: the one nearer in time (B from halfway on). The other is only
+    // searched where it is needed (its search costs as much as the main one's, and most pixels never
+    // use it): a fill where the main frame found nothing.
     float t = Mix.x;
-    bool aFixed = a.reason == R_GUI || a.reason == R_HAND || a.reason == R_LOCKED;
-    bool bFixed = b.reason == R_GUI || b.reason == R_HAND || b.reason == R_LOCKED;
-    if (aFixed || bFixed) {
+    bool useB = t >= 0.5;
+    Warp p = useB ? warpB(uvDst) : warpA(uvDst);
+    bool pFixed = isFixed(p.reason);
+    bool oFixed = useB ? fixedAt(uvDst, WorldA, MaskA, FinalA, AFlags)
+                       : fixedAt(uvDst, WorldB, MaskB, FinalB, BFlags);
+    if (pFixed || oFixed) {
         // GUI or held item in either source: the source nearer in time decides the whole pixel
         // (its hand, its GUI, or its world there). Mixing would show both hand positions at once.
-        bool useB = t >= 0.5;
-        Warp n = useB ? b : a;
-        bool nFixed = useB ? bFixed : aFixed;
-        color = n.color;
-        reason = n.reason;
-        if (!nFixed && !n.hit) {
+        color = p.color;
+        reason = p.reason;
+        if (!pFixed && !p.hit) {
             // Where the other frame's hand was, and this one's warp found nothing (it lands on
             // its own hand edge): the world there barely moves in a fraction of a frame, so show
             // it unwarped instead of a fill that streaks.
-            color = n.still;
+            color = p.still;
             reason = R_ROTATION;
         }
-    } else {
-        // One frame builds the picture: the one nearer in time (B from halfway on). Choosing per
-        // pixel between A and B made edges a patchwork of both frames, which with a shader pack's
-        // TAA (soft, jittered edges that differ frame to frame) showed as every block edge
-        // shimmering. The other frame only fills what the main one could not see (uncovered
+    } else if (p.hit) {
+        // Choosing per pixel between A and B made edges a patchwork of both frames, which with a
+        // shader pack's TAA (soft, jittered edges that differ frame to frame) showed as every block
+        // edge shimmering. So the other frame only fills what the main one could not see (uncovered
         // behind a moving edge, or off its screen).
-        bool useB = t >= 0.5;
-        Warp p = useB ? b : a;
-        Warp o = useB ? a : b;
-        if (p.hit) {
-            color = p.color;
-            reason = p.flowed ? R_FLOW : p.reason;
-        } else if (o.hit && !o.entity) {
+        color = p.color;
+        reason = p.flowed ? R_FLOW : p.reason;
+    } else {
+        Warp o = useB ? warpA(uvDst) : warpB(uvDst);
+        if (o.hit && !o.entity) {
             // (Not a moving entity from the other frame: its limbs are in another pose there, and
             // filling from it showed both sets of legs.)
             color = o.color;
