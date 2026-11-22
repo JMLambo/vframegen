@@ -54,6 +54,10 @@ dependencies {
     compileOnly("maven.modrinth:controlify:${project.controlify_version}") { transitive = false }
     localRuntime("maven.modrinth:controlify:${project.controlify_version}") { transitive = false }
     localRuntime("maven.modrinth:yacl:${project.yacl_version}") { transitive = false }
+
+    // Optional: a VFrameGen page in Sodium's video settings (its config API at compile time;
+    // the dev client loads Sodium from run/mods).
+    compileOnly("maven.modrinth:sodium:${project.sodium_version}") { transitive = false }
 }
 
 processResources {
