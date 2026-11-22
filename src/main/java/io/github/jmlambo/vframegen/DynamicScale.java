@@ -52,6 +52,11 @@ public final class DynamicScale {
         return 1.0;
     }
 
+    /** When this loop started (0 before the first). */
+    public static long loopStartNs() {
+        return loopStartNs;
+    }
+
     public static void loopStart() {
         loopStartNs = System.nanoTime();
     }

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- First-launch setup: on a fresh install, the first seconds in a world are measured, and a preset
+  and target frame rate (the display's refresh rate) are picked and announced in a toast. Existing
+  configs are left alone; set firstRunPending=true in the config to run it again.
+
 - Presets (General, on the Sodium page too): Low-end, Balanced and Quality set frame generation,
   render scale, upscaling and anti-aliasing together; changing any of them by hand shows Custom.
 
