@@ -68,7 +68,7 @@ jobs:
           # Release type from the version: alphas and betas stay off the default file list.
           case "${version}" in
             *-alpha*) type=alpha ;;
-            *-beta*) type=beta ;;
+            *-*) type=beta ;; # beta, rc and any other suffix: never a default download
             *) type=release ;;
           esac
 
