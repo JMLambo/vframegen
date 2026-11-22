@@ -893,12 +893,14 @@ public final class FrameGenerator {
     // iGPU at 1080p), asking for more and more of them to reach the target only slowed the real
     // frames, which asked for even more: 60 real fps fell to 15. With this share the time between
     // real frames settles at most 1 / (1 - share) of what it was (real fps keeps 75% or more).
+    // No floor: where even one generated frame per real frame is too much, only some pairs get
+    // one (1.4x), down to none.
     private static final double GPU_BUDGET_SHARE = 0.25;
 
     /** The most frames per real frame whose generated frames fit in that GPU budget. */
     private double gpuBudgetCeiling() {
         if (gpuPassAvgNs <= 0 || adaptiveIntervalNs <= 0) return FrameGenConfig.ADAPTIVE_MAX_MULTIPLIER;
-        return Math.clamp(1.0 + GPU_BUDGET_SHARE * adaptiveIntervalNs / gpuPassAvgNs, 2.0, FrameGenConfig.ADAPTIVE_MAX_MULTIPLIER);
+        return Math.clamp(1.0 + GPU_BUDGET_SHARE * adaptiveIntervalNs / gpuPassAvgNs, 1.0, FrameGenConfig.ADAPTIVE_MAX_MULTIPLIER);
     }
 
     private double adaptiveCeiling() {
