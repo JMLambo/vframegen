@@ -130,8 +130,9 @@ public final class FrameGenConfig {
         boolean readFailed = false;
         if (!Files.exists(p) && !Files.notExists(p)) {
             // Can't tell whether it exists (e.g. no access): not a fresh install, and not ours to replace.
-            VFrameGen.LOGGER.warn("Could not check {}, using defaults; it is not written at startup, but saving settings will replace it", p);
+            VFrameGen.LOGGER.warn("Could not check {}, using defaults; a copy is kept before settings are saved over it", p);
             c.firstRunPending = false;
+            c.backupBeforeSave = true;
             return c;
         }
         if (Files.exists(p)) {
@@ -176,15 +177,37 @@ public final class FrameGenConfig {
                 c.upscaler = enumOf(props, "upscaler", c.upscaler, Upscaler.class);
                 c.upscaleSharpness = Math.clamp(dbl(props, "upscaleSharpness", c.upscaleSharpness), 0.0, 1.0);
             } catch (IOException | RuntimeException e) {
-                VFrameGen.LOGGER.warn("Could not read {}, using defaults; it is not written at startup, but saving settings will replace it", p, e);
+                VFrameGen.LOGGER.warn("Could not read {}, using defaults; a copy is kept before settings are saved over it", p, e);
                 readFailed = true;
+                c.backupBeforeSave = true;
             }
         }
         if (!readFailed) c.save();
         return c;
     }
 
+    /**
+     * The file on disk could not be read (or checked) at load: keep a copy of it before the first
+     * save replaces it, so nothing is lost. If the copy can't be made, that save is skipped.
+     */
+    private transient boolean backupBeforeSave;
+
     public void save() {
+        if (backupBeforeSave) {
+            Path p = path();
+            try {
+                if (!Files.notExists(p)) {
+                    String stamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
+                    Path backup = p.resolveSibling(p.getFileName() + ".broken-" + stamp);
+                    Files.copy(p, backup, java.nio.file.StandardCopyOption.COPY_ATTRIBUTES);
+                    VFrameGen.LOGGER.warn("{} could not be read; kept a copy as {} before saving", p, backup.getFileName());
+                }
+                backupBeforeSave = false;
+            } catch (IOException | RuntimeException e) {
+                VFrameGen.LOGGER.warn("Could not back up the unreadable {}; not saving over it", p, e);
+                return;
+            }
+        }
         java.util.TreeMap<String, String> values = new java.util.TreeMap<>();
         values.put("enabled", Boolean.toString(enabled));
         values.put("multiplier", Integer.toString(multiplier));
