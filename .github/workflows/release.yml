@@ -3,9 +3,16 @@ name: Release
 # Push a tag like v0.2.0 (matching mod_version in gradle.properties) to build the mod and publish
 # a GitHub Release with the jar attached and notes generated from the commits since the last one,
 # then upload the same jar to CurseForge (needs the CURSEFORGE_TOKEN secret; skipped without it).
+# Run it by hand (Actions > Release > Run workflow) with an existing tag to redo only the CurseForge
+# upload for that release.
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to upload to CurseForge (for example v1.0.0-beta.2)
+        required: true
 
 permissions:
   contents: write
@@ -13,17 +20,20 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - name: Check out
         uses: actions/checkout@v7
         with:
+          ref: ${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.sha }}
           fetch-depth: 0 # full history, for the generated release notes
 
       - name: Check the tag matches mod_version
         run: |
           version=$(grep -E '^mod_version=' gradle.properties | cut -d= -f2 | tr -d '[:space:]')
-          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
-            echo "::error::Tag ${GITHUB_REF_NAME} does not match mod_version=${version} (expected v${version})"
+          if [ "${TAG}" != "v${version}" ]; then
+            echo "::error::Tag ${TAG} does not match mod_version=${version} (expected v${version})"
             exit 1
           fi
 
@@ -42,13 +52,14 @@ jobs:
         run: ./gradlew build --stacktrace
 
       - name: Publish the GitHub Release
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           prerelease=""
-          case "${GITHUB_REF_NAME}" in *-*) prerelease="--prerelease" ;; esac
-          gh release create "${GITHUB_REF_NAME}" build/libs/*.jar \
-            --title "VFrameGen ${GITHUB_REF_NAME#v}" \
+          case "${TAG}" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "${TAG}" build/libs/*.jar \
+            --title "VFrameGen ${TAG#v}" \
             --generate-notes --verify-tag ${prerelease}
 
       - name: Upload to CurseForge
@@ -60,7 +71,7 @@ jobs:
             echo "::warning::CURSEFORGE_TOKEN is not set; skipping the CurseForge upload"
             exit 0
           fi
-          version="${GITHUB_REF_NAME#v}"
+          version="${TAG#v}"
           mc=$(grep -E '^minecraft_version=' gradle.properties | cut -d= -f2 | tr -d '[:space:]')
           jar=$(ls build/libs/*.jar | grep -v -- '-sources\.jar$' | head -n1)
           api=https://minecraft.curseforge.com/api
@@ -85,17 +96,25 @@ jobs:
             $0 ~ "^## \\[?" v "([] ]|$)" { f = 1; next }
             /^## / { if (f) exit }
             f' CHANGELOG.md)
-          [ -n "${changelog}" ] || changelog="See https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}"
+          [ -n "${changelog}" ] || changelog="See https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
 
           # CurseForge wants numeric ids for the game version, loader, Java and environment tags.
+          # Names repeat across groups (26.3 is listed more than once), so each is matched within
+          # its own group: the Minecraft version group, mod loaders, Java, and environment.
           curl -sfS -H "X-Api-Token: ${CF_TOKEN}" "${api}/game/versions" > versions.json
-          ids=$(jq -c --arg mc "${mc}" '
-            [ .[] | select(.name == $mc or .name == "Fabric" or .name == "Java 25" or .name == "Client") | .id ]
-            | unique' versions.json)
-          if [ "$(echo "${ids}" | jq length)" -ne 4 ]; then
-            echo "::error::Expected exactly one CurseForge tag each for (${mc}, Fabric, Java 25, Client): ${ids}"
+          curl -sfS -H "X-Api-Token: ${CF_TOKEN}" "${api}/game/version-types" > types.json
+          ids=$(jq -c --arg mc "${mc}" --slurpfile types types.json '
+            ($types[0] | map({key: (.id | tostring), value: .slug}) | from_entries) as $slug
+            | def pick(name; ok): [ .[] | select(.name == name and ($slug[.gameVersionTypeID | tostring] // "" | ok)) ] | max_by(.id) | .id;
+            [ pick($mc; startswith("minecraft")), pick("Fabric"; . == "modloader"),
+              pick("Java 25"; . == "java"), pick("Client"; . == "environment") ]' versions.json)
+          if echo "${ids}" | jq -e 'any(. == null)' > /dev/null; then
+            echo "::error::Missing a CurseForge tag for one of (${mc}, Fabric, Java 25, Client): ${ids}"
+            jq -c --arg mc "${mc}" '[ .[] | select(.name == $mc or .name == "Fabric" or .name == "Java 25" or .name == "Client") ]' versions.json
+            jq -c '.' types.json | head -c 4000
             exit 1
           fi
+          echo "CurseForge tags: ${ids}"
 
           metadata=$(jq -n \
             --arg changelog "${changelog}" --arg name "${name}" --arg type "${type}" --argjson ids "${ids}" \
