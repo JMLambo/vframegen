@@ -43,8 +43,12 @@ import java.nio.LongBuffer;
  * frames go through the swapchain as before.
  */
 public final class PresentQueue {
-    /** Pending buffers: the generated frames of two real frames at the highest (adaptive) multiplier. */
-    public static final int SLOTS = 2 * (FrameGenConfig.ADAPTIVE_MAX_MULTIPLIER - 1);
+    /**
+     * Pending buffers. FrameGenerator keeps the present queue at most one pair (plus one) deep, so
+     * at the highest (adaptive) multiplier one pair's generated frames, plus a couple whose blit is
+     * still finishing, fit; more were never used once the queue was capped.
+     */
+    public static final int SLOTS = FrameGenConfig.ADAPTIVE_MAX_MULTIPLIER + 2;
 
     private static final int VK_SUCCESS = 0;
     private static final int VK_TIMEOUT = 2;
