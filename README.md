@@ -124,10 +124,12 @@ Frame generation makes motion smoother; it does not make the game itself run fas
   is what Temporal falls back to with a pack) frees the most GPU time where it is scarcest: a
   higher real frame rate means less input delay, fewer artifacts, and generated frames that have
   less to guess. Much lower and shader packs get visibly grainy.
-- **NVIDIA RTX cards follow more motion (beta).** On RTX 20 series and newer (Vulkan), the GPU's optical
-  flow hardware also tracks what depth alone can't: mob limbs, fire, particles, water and animated
-  textures. It is in beta: if generated frames look wrong, turn off **Hardware optical flow** and
-  please report it. On other GPUs the setting is greyed out and frames use depth only (an experimental option for AMD and Intel is planned).
+- **Optical flow follows more motion (beta).** Generated frames also follow what depth alone
+  can't: mob limbs, fire, particles, water and animated textures. NVIDIA RTX cards (20 series and
+  newer, Vulkan) measure it with their optical flow hardware. Other GPUs (AMD, Intel, or NVIDIA on
+  OpenGL) measure it with shaders, which is experimental: less precise, and it costs some GPU time
+  (it measures at a lower resolution on slower GPUs). If generated frames look wrong, turn off
+  **Optical flow** and please report it.
 - **Fast turns can show artifacts at low real frame rates.** The lower the real frame rate, the
   further each generated frame has to guess between two real ones. Above about 40 real fps it is
   hard to notice.

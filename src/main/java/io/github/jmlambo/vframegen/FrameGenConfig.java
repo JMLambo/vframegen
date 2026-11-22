@@ -122,9 +122,10 @@ public final class FrameGenConfig {
             debugTint               tint generated frames magenta, to see which frames are generated.
             debugCaptures           F8 (or the controller button) saves the next frames as images.
             debugFrameLog           keep a log of the last ~10 s of presented frames; F8 saves it too.
-            opticalFlow             (beta) NVIDIA RTX, interpolated mode: the GPU's optical flow hardware measures
-                                    motion between real frames, so generated frames also follow what depth
-                                    alone cannot (limbs, particles, water, animated textures).
+            opticalFlow             (beta) interpolated mode: measure how the picture moved between real
+                                    frames, so generated frames also follow what depth alone cannot (limbs,
+                                    particles, water, animated textures). NVIDIA RTX on Vulkan uses its optical
+                                    flow hardware; other GPUs measure it with shaders (experimental).
             debugOpticalFlow        interpolated mode: measure optical flow even when it is not used; F8 saves
                                     it as an image
                                     (F8 captures need debugCaptures on).

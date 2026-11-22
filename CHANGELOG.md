@@ -2,7 +2,13 @@
 
 ## Unreleased
 
-- The Quality preset turns on optical flow (used where the GPU supports it).
+- Optical flow on every GPU (experimental where there is no optical flow hardware: AMD, Intel, or
+  NVIDIA on OpenGL). It is measured with shaders, as a coarse-to-fine block search in the spirit of
+  FSR 3's optical flow (draw passes, since the game's renderer has no compute shaders), with a
+  median filter against wrong matches. Its measuring resolution follows its GPU time (about 1 ms at
+  most), so slower GPUs measure smaller. NVIDIA RTX on Vulkan keeps using its optical flow hardware.
+  The setting is now "Optical flow (beta)"; its tooltip says which kind your GPU uses.
+- The Quality preset turns on optical flow.
 
 ## 1.0.0-beta.3
 
