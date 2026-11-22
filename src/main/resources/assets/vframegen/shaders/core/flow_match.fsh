@@ -16,7 +16,8 @@ uniform sampler2D Ref;   // brightness of the other frame
 uniform sampler2D Prev;  // the coarser level's flow (only read when Params.x is set)
 
 layout(std140) uniform FlowMatch {
-    vec4 Params; // x: has a coarser level, y: search radius (pixels), z: output scale (last level: to measured-image pixels)
+    vec4 Params; // x: has a coarser level, y: search radius (pixels), z: output scale (last level: to measured-image pixels),
+                 //  w: least block texture to trust (finest level only; 0: trust every block)
 };
 
 layout(location = 0) in vec2 texCoord;
@@ -81,6 +82,26 @@ void main() {
     float dx = cxm + cxp - 2.0 * c0, dy = cym + cyp - 2.0 * c0;
     vec2 sub = vec2(dx > 1.0e-5 ? clamp(0.5 * (cxm - cxp) / dx, -0.5, 0.5) : 0.0,
                     dy > 1.0e-5 ? clamp(0.5 * (cym - cyp) / dy, -0.5, 0.5) : 0.0);
+
+    // A block with almost no texture (sky, fog, a flat wall) matches nearly everywhere, so its
+    // answer is noise. Mark it untrusted: a vector far off the image, which the reprojection's
+    // off-image check rejects (and which a 3x3 median drops when its neighbours are trusted).
+    if (Params.w > 0.0) {
+        ivec2 last = textureSize(Cur, 0) - 1;
+        float tex = 0.0;
+        for (int y = 0; y < BLOCK; y++) {
+            for (int x = 0; x < BLOCK; x++) {
+                ivec2 p = clamp(base + ivec2(x, y), ivec2(0), last);
+                float c = texelFetch(Cur, p, 0).r;
+                tex += abs(texelFetch(Cur, min(p + ivec2(1, 0), last), 0).r - c)
+                     + abs(texelFetch(Cur, min(p + ivec2(0, 1), last), 0).r - c);
+            }
+        }
+        if (tex < Params.w) {
+            fragColor = vec4(16000.0, 16000.0, bestCost, 1.0);
+            return;
+        }
+    }
 
     fragColor = vec4((vec2(best) + sub) * Params.z, bestCost, 1.0);
 }
