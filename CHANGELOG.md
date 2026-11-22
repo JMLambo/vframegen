@@ -8,7 +8,8 @@
   median filter against wrong matches. Its measuring resolution follows its GPU time (about 1 ms at
   most), so slower GPUs measure smaller. NVIDIA RTX on Vulkan keeps using its optical flow hardware.
   The setting is now "Optical flow (beta)"; its tooltip says which kind your GPU uses.
-- The Quality preset turns on optical flow.
+- The Quality preset turns optical flow on, and the Low-end preset turns it off (its GPU time goes to
+  the real frames instead).
 
 ## 1.0.0-beta.3
 
