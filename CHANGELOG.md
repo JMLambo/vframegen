@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The Quality preset turns on optical flow (used where the GPU supports it).
+
 ## 1.0.0-beta.3
 
 - Hardware optical flow on NVIDIA RTX (20 series and newer, Vulkan), in beta: the GPU's optical flow unit
