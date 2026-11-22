@@ -31,6 +31,8 @@ final class FrameSlot {
     final int[] entityIds = new int[MAX_ENTITIES];
     final double[] entityPos = new double[MAX_ENTITIES * 3];
     final float[] entityBox = new float[MAX_ENTITIES * 6];
+    /** Each entity's velocity, blocks per second (motion blur). */
+    final float[] entityVel = new float[MAX_ENTITIES * 3];
     final Matrix4f viewRot = new Matrix4f();
     final Matrix4f proj = new Matrix4f();
     // Debug: both candidates for proj, with and without vanilla's view bobbing.
