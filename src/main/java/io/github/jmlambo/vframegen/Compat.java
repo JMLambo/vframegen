@@ -34,6 +34,8 @@ public final class Compat {
         }
     }
 
+    private static java.lang.reflect.Method irisPipelineManager;
+    private static java.lang.reflect.Method irisPipelineNullable;
     private static java.lang.reflect.Field irisRenderTargets;
     private static java.lang.reflect.Method irisNoTranslucents;
     private static boolean irisDepthLookupFailed;
@@ -45,16 +47,16 @@ public final class Compat {
     public static com.mojang.renderpearl.api.textures.GpuTexture irisDepthNoTranslucents() {
         if (!IRIS || irisDepthLookupFailed) return null;
         try {
-            Object pipeline = Class.forName("net.irisshaders.iris.Iris").getMethod("getPipelineManager").invoke(null);
-            pipeline = pipeline.getClass().getMethod("getPipelineNullable").invoke(pipeline);
-            if (pipeline == null) return null;
             if (irisRenderTargets == null) {
+                irisPipelineManager = Class.forName("net.irisshaders.iris.Iris").getMethod("getPipelineManager");
+                irisPipelineNullable = Class.forName("net.irisshaders.iris.pipeline.PipelineManager").getMethod("getPipelineNullable");
                 Class<?> irisPipeline = Class.forName("net.irisshaders.iris.pipeline.IrisRenderingPipeline");
                 irisRenderTargets = irisPipeline.getDeclaredField("renderTargets");
                 irisRenderTargets.setAccessible(true);
                 irisNoTranslucents = Class.forName("net.irisshaders.iris.targets.RenderTargets")
                         .getMethod("getDepthTextureNoTranslucents");
             }
+            Object pipeline = irisPipelineNullable.invoke(irisPipelineManager.invoke(null));
             if (!irisRenderTargets.getDeclaringClass().isInstance(pipeline)) return null;
             Object targets = irisRenderTargets.get(pipeline);
             return targets == null ? null : (com.mojang.renderpearl.api.textures.GpuTexture) irisNoTranslucents.invoke(targets);
