@@ -118,9 +118,11 @@ jobs:
 
           metadata=$(jq -n \
             --arg changelog "${changelog}" --arg name "${name}" --arg type "${type}" --argjson ids "${ids}" \
+            --argjson optional '["sodium", "irisshaders", "distant-horizons", "modmenu", "cloth-config", "controlify", "reflex-antilag"]' \
             '{changelog: $changelog, changelogType: "markdown", displayName: $name, releaseType: $type,
               gameVersions: $ids,
-              relations: {projects: [{slug: "fabric-api", type: "requiredDependency"}]}}')
+              relations: {projects: ([{slug: "fabric-api", type: "requiredDependency"}]
+                + ($optional | map({slug: ., type: "optionalDependency"})))}}')
           curl -sfS -H "X-Api-Token: ${CF_TOKEN}" \
             --form-string "metadata=${metadata}" -F "file=@${jar}" \
             "${api}/projects/${CF_PROJECT}/upload-file"
