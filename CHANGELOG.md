@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Hardware optical flow on NVIDIA RTX (20 series and newer, Vulkan), in beta: the GPU's optical flow unit
+  measures how the picture moved between the two real frames, and generated frames follow the part
+  depth reprojection cannot see (mob limbs, fire, particles, water, animated textures). Camera and
+  whole-entity motion still come from depth; the flow is used only where both directions agree and
+  it differs from depth by more than a couple of pixels. On by default where supported (setting
+  "Hardware optical flow", greyed out on other GPUs); interpolated mode only. About 0.25 ms of
+  render-thread time per real frame. Beta: tested on an RTX 4050 only so far; turn it off if
+  generated frames look wrong.
 - Screenshots (F2) with render scale below 100% (for example dynamic render scale with a shader
   pack) were the small world image without the GUI. They are the full-size picture again.
 - Adaptive frame generation can go up to 8x (fixed multipliers stay at 2x to 6x), for very low

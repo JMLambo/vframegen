@@ -31,6 +31,33 @@ public abstract class VulkanPhysicalDeviceMixin implements PresentQueuePlan {
     @org.spongepowered.asm.mixin.Unique
     private int vframegen$index = -1;
 
+    @org.spongepowered.asm.mixin.Unique
+    private int vframegen$flowFamily = -1;
+    @org.spongepowered.asm.mixin.Unique
+    private int vframegen$flowIndex = -1;
+    @org.spongepowered.asm.mixin.Unique
+    private java.util.List<String> vframegen$flowExtensions = java.util.List.of();
+
+    @Override
+    public int vframegen$graphicsFamily() {
+        return graphicsQueueFamilyAndIndex == null ? -1 : graphicsQueueFamilyAndIndex.leftInt();
+    }
+
+    @Override
+    public int vframegen$flowFamily() {
+        return vframegen$flowFamily;
+    }
+
+    @Override
+    public int vframegen$flowIndex() {
+        return vframegen$flowIndex;
+    }
+
+    @Override
+    public java.util.List<String> vframegen$flowExtensions() {
+        return vframegen$flowExtensions;
+    }
+
     @Override
     public int vframegen$presentFamily() {
         return vframegen$family;
@@ -50,6 +77,11 @@ public abstract class VulkanPhysicalDeviceMixin implements PresentQueuePlan {
 
     @Inject(method = "<init>", at = @At("RETURN"), require = 0)
     private void vframegen$presentQueue(VkPhysicalDevice physical, CallbackInfo ci) {
+        try {
+            vframegen$planFlow();
+        } catch (Throwable t) {
+            io.github.jmlambo.vframegen.OpticalFlow.LOGGER.warn("Optical flow check failed", t);
+        }
         if (graphicsQueueFamilyAndIndex == null) return;
         int family = graphicsQueueFamilyAndIndex.leftInt();
         int used = queueFamilyCreateInfoMap.get(family);
@@ -65,5 +97,71 @@ public abstract class VulkanPhysicalDeviceMixin implements PresentQueuePlan {
         queueFamilyCreateInfoMap = Int2IntMaps.unmodifiable(map);
         vframegen$family = family;
         vframegen$index = used;
+    }
+
+    /** A queue of the optical-flow family when the device has VK_NV_optical_flow (NVIDIA RTX 20 and newer). */
+    @org.spongepowered.asm.mixin.Unique
+    private void vframegen$planFlow() {
+        java.util.Set<String> available = new java.util.HashSet<>();
+        // The list is too big for the LWJGL stack (about 260 bytes per extension), so it goes on the heap.
+        try (MemoryStack stack = MemoryStack.stackPush();
+             org.lwjgl.vulkan.VkExtensionProperties.Buffer exts = vframegen$extensions(stack)) {
+            if (exts == null) return; // the query failed: no optical flow
+            for (org.lwjgl.vulkan.VkExtensionProperties e : exts) available.add(e.extensionNameString());
+        }
+        String flow = org.lwjgl.vulkan.NVOpticalFlow.VK_NV_OPTICAL_FLOW_EXTENSION_NAME;
+        if (!available.contains(flow)) return;
+        // The extension being listed does not mean the feature is there: ask for it.
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            org.lwjgl.vulkan.VkPhysicalDeviceOpticalFlowFeaturesNV feature =
+                    org.lwjgl.vulkan.VkPhysicalDeviceOpticalFlowFeaturesNV.calloc(stack).sType$Default();
+            org.lwjgl.vulkan.VkPhysicalDeviceFeatures2 features =
+                    org.lwjgl.vulkan.VkPhysicalDeviceFeatures2.calloc(stack).sType$Default().pNext(feature.address());
+            org.lwjgl.vulkan.VK11.vkGetPhysicalDeviceFeatures2(vkPhysicalDevice, features);
+            if (!feature.opticalFlow()) return;
+        }
+        int family = -1;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            IntBuffer count = stack.mallocInt(1);
+            VK12.vkGetPhysicalDeviceQueueFamilyProperties(vkPhysicalDevice, count, null);
+            VkQueueFamilyProperties.Buffer props = VkQueueFamilyProperties.calloc(count.get(0), stack);
+            VK12.vkGetPhysicalDeviceQueueFamilyProperties(vkPhysicalDevice, count, props);
+            for (int i = 0; i < props.capacity(); i++) {
+                if ((props.get(i).queueFlags() & org.lwjgl.vulkan.NVOpticalFlow.VK_QUEUE_OPTICAL_FLOW_BIT_NV) != 0
+                        && props.get(i).queueCount() > queueFamilyCreateInfoMap.get(i)) {
+                    family = i;
+                    break;
+                }
+            }
+        }
+        if (family < 0 || graphicsQueueFamilyAndIndex == null) return;
+        java.util.List<String> extensions = new java.util.ArrayList<>(java.util.List.of(flow));
+        // Dependencies of VK_NV_optical_flow; already core on Vulkan 1.3, listed only when the driver offers them.
+        for (String dep : new String[]{"VK_KHR_synchronization2", "VK_KHR_format_feature_flags2"}) {
+            if (available.contains(dep)) extensions.add(dep);
+        }
+        int used = queueFamilyCreateInfoMap.get(family);
+        Int2IntMap map = new Int2IntArrayMap(queueFamilyCreateInfoMap);
+        map.put(family, used + 1);
+        queueFamilyCreateInfoMap = Int2IntMaps.unmodifiable(map);
+        vframegen$flowFamily = family;
+        vframegen$flowIndex = used;
+        vframegen$flowExtensions = java.util.List.copyOf(extensions);
+    }
+
+    /** The device's extensions (heap memory, caller frees), or null when the query failed. */
+    @org.spongepowered.asm.mixin.Unique
+    private org.lwjgl.vulkan.VkExtensionProperties.Buffer vframegen$extensions(MemoryStack stack) {
+        IntBuffer count = stack.mallocInt(1);
+        // VK_INCOMPLETE (the list grew between the two calls) is retried a few times.
+        for (int attempt = 0; attempt < 3; attempt++) {
+            if (VK12.vkEnumerateDeviceExtensionProperties(vkPhysicalDevice, (java.nio.ByteBuffer) null, count, null) != 0) return null;
+            org.lwjgl.vulkan.VkExtensionProperties.Buffer exts = org.lwjgl.vulkan.VkExtensionProperties.calloc(count.get(0));
+            int result = VK12.vkEnumerateDeviceExtensionProperties(vkPhysicalDevice, (java.nio.ByteBuffer) null, count, exts);
+            if (result == 0) return exts;
+            exts.free();
+            if (result != 5) return null; // VK_INCOMPLETE
+        }
+        return null;
     }
 }

@@ -17,6 +17,7 @@
     "RenderSystemAccessor",
     "RenderTargetAccessor",
     "ScreenshotMixin",
+    "VulkanBackendMixin",
     "VulkanCommandEncoderMixin",
     "VulkanDeviceMixin",
     "VulkanPhysicalDeviceMixin",

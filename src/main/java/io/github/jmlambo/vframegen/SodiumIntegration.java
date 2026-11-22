@@ -122,6 +122,11 @@ public final class SodiumIntegration implements ConfigEntryPoint {
                         .setDefaultValue(Math.round(def.motionBlurStrength * 100)).setStorageHandler(storage)
                         .setEnabledProvider(s -> s.readBooleanOption(id("motionBlur")), id("motionBlur"))
                         .setBinding(v -> cfg.motionBlurStrength = v / 100f, () -> Math.round(cfg.motionBlurStrength * 100)));
+        // Greyed out unless the GPU has hardware optical flow (NVIDIA RTX 20 and newer, on Vulkan).
+        quality.addOption(bool(b, storage, "opticalFlow", def.opticalFlow, v -> cfg.opticalFlow = v, () -> cfg.opticalFlow)
+                .setTooltip(OpticalFlow.available() ? tip("opticalFlow") : tip("opticalFlow.unsupported"))
+                // Re-checked whenever the screen is rebuilt (optical flow turns itself off on a GPU error).
+                .setEnabledProvider(st -> OpticalFlow.available(), net.caffeinemc.mods.sodium.api.config.ConfigState.UPDATE_ON_REBUILD));
 
         var page = b.createOptionPage()
                 .setName(Component.translatable("vframegen.sodium.page"))

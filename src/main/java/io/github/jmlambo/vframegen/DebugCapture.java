@@ -113,7 +113,9 @@ public final class DebugCapture {
         GpuFormat format = texture.getFormat();
         // 8-bit, or half float (some setups render the main target in RGBA16F): clamped to 0..1.
         boolean half = format == GpuFormat.RGBA16_FLOAT;
-        if (format != GpuFormat.RGBA8_UNORM && !half) {
+        // Optical flow (RG16 snorm holding pixels * 32): shown as colour, grey = still, red/green = x/y motion.
+        boolean flow = format == GpuFormat.RG16_SNORM;
+        if (format != GpuFormat.RGBA8_UNORM && !half && !flow) {
             VFrameGen.LOGGER.warn("Cannot save {}: format {} is not RGBA8 or RGBA16F", name, format);
             return;
         }
@@ -130,7 +132,11 @@ public final class DebugCapture {
                 for (int y = 0; y < h; y++) {
                     for (int x = 0; x < w; x++) {
                         int abgr;
-                        if (half) {
+                        if (flow) {
+                            int o = (y * w + x) * 4;
+                            int r = Math.clamp(128 + data.getShort(o) / 8, 0, 255), g = Math.clamp(128 + data.getShort(o + 2) / 8, 0, 255);
+                            abgr = 0xFF000000 | (128 << 16) | (g << 8) | r;
+                        } else if (half) {
                             int o = (y * w + x) * 8;
                             int r = unit(data.getShort(o)), g = unit(data.getShort(o + 2)), b = unit(data.getShort(o + 4));
                             abgr = 0xFF000000 | (b << 16) | (g << 8) | r;
