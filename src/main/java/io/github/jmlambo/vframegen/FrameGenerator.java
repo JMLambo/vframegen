@@ -132,6 +132,7 @@ public final class FrameGenerator {
     private int gpuPassCount;
     // Smoothed GPU time of one generated frame (0: not measured yet), for adaptive mode's budget.
     private double gpuPassAvgNs;
+    private int gpuPassStale; // timers still pending from before the last invalidate()
     private final Map<String, RenderPipeline> pipelines = new HashMap<>();
     private boolean broken;
 
@@ -279,6 +280,9 @@ public final class FrameGenerator {
         // The auto cap's samples carry over between seconds; not across a pause or settings change.
         fitCount = missCount = roomySeconds = badSeconds = 0;
         minSlackMs = Double.MAX_VALUE;
+        // A settings change can change what a generated frame costs: measure it again.
+        gpuPassAvgNs = 0;
+        gpuPassStale = gpuTimers.size();
     }
 
 
@@ -1518,7 +1522,8 @@ public final class FrameGenerator {
             long pass = Math.max(0, t1.getAsLong() - t0.getAsLong());
             gpuPassNs += pass;
             gpuPassCount++;
-            gpuPassAvgNs = gpuPassAvgNs <= 0 ? pass : gpuPassAvgNs + (pass - gpuPassAvgNs) * 0.05;
+            if (gpuPassStale > 0) gpuPassStale--; // measured before invalidate(): the old workload
+            else gpuPassAvgNs = gpuPassAvgNs <= 0 ? pass : gpuPassAvgNs + (pass - gpuPassAvgNs) * 0.05;
         }
     }
 
