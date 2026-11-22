@@ -169,7 +169,17 @@ void main() {
     // Something else was in front last frame (newly uncovered): the history there shows that, not
     // this surface. Compared by distance from the last camera, with some slack (jitter, slopes).
     if (Flags.z > 0.5 && !sky) {
-        float pd = texture(PrevDepth, prevUv).r;
+        // The farthest depth around that spot: at the edge of something nearer, one sample lands on
+        // it one frame and misses it the next (jitter), which made edges flicker. Only when the
+        // whole neighbourhood was nearer is this surface really newly uncovered.
+        ivec2 pt = ivec2(prevUv * LowSize.xy);
+        float pd = Flags.x > 0.5 ? 1.0 : 0.0;
+        for (int y = -1; y <= 1; y++) {
+            for (int x = -1; x <= 1; x++) {
+                float s = texelFetch(PrevDepth, clamp(pt + ivec2(x, y), ivec2(0), maxTexel), 0).r;
+                pd = Flags.x > 0.5 ? min(pd, s) : max(pd, s);
+            }
+        }
         // Only something nearer counts: farther (or sky) there is just a moving silhouette edge.
         bool rejected = false;
         if (!isSky(pd)) {
