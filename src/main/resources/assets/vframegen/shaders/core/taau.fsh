@@ -16,7 +16,7 @@
 // Over a few frames the history fills in detail at full resolution. At 100% render scale it is
 // plain temporal anti-aliasing.
 
-uniform sampler2D Color;   // this frame, low resolution (read with texelFetch)
+uniform sampler2D Color;   // this frame, low resolution (texelFetch; linear for the held item)
 uniform sampler2D Depth;   // its depth, before the held item
 uniform sampler2D Hand;    // held item depth (sky where there is none)
 uniform sampler2D History; // last output, full resolution (linear)
@@ -118,8 +118,13 @@ void main() {
     }
     vec3 current = wsum > 1.0e-4 ? sum / wsum : texelFetch(Color, clamp(centre, ivec2(0), maxTexel), 0).rgb;
 
-    // The held item moves with the camera, not the world: no history for it.
-    if (Jitter.z > 0.5 || hand) {
+    // The held item is drawn without the jitter, so its samples sit at the texel centres: read it
+    // as is (rebuilding it from jittered positions would shake it a little every frame).
+    if (hand) {
+        fragColor = vec4(texture(Color, uv).rgb, 1.0);
+        return;
+    }
+    if (Jitter.z > 0.5) {
         fragColor = vec4(current, 1.0);
         return;
     }

@@ -236,7 +236,7 @@ public final class TemporalUpscaler {
             GpuSampler linear = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);
             try (RenderPass pass = encoder.createRenderPass(() -> "VFrameGen TAAU", historyView[dst], Optional.empty())) {
                 pass.setPipeline(RenderSystem.getCompiledPipeline(pipeline(colorFormat)));
-                pass.setUniform("Color", colorLow, nearest);
+                pass.setUniform("Color", colorLow, linear);
                 pass.setUniform("Depth", depthView, nearest);
                 pass.setUniform("Hand", handCaptured ? handView : depthView, nearest);
                 pass.setUniform("History", historyView[src], linear);
