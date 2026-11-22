@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Coming up: better compatibility with other mods will be the main focus of the next few betas,
+  along with smoothing out the experience on more hardware setups.
 - Generated frames are cheaper to make: the second real frame is only searched where it is used,
   and each search stops once it has found its pixel. On a Radeon 660M at 1080p a generated frame
   went from about 9 ms to about 4.3 ms of GPU time, with the same picture.
