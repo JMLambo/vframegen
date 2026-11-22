@@ -16,18 +16,13 @@ final class ClothConfigScreen {
     static Screen create(Screen parent) {
         FrameGenConfig cfg = VFrameGen.config();
         FrameGenConfig def = new FrameGenConfig();
-        int maxFramesBefore = cfg.maxFramesPerReal();
 
         ConfigBuilder builder = ConfigBuilder.create()
                 .setParentScreen(parent)
                 .setTitle(Component.translatable("vframegen.config.title"))
                 .setSavingRunnable(() -> {
                     cfg.save();
-                    FrameGenerator.INSTANCE.invalidate();
-                    // The swapchain's image count follows the multiplier: recreate it.
-                    if (cfg.maxFramesPerReal() != maxFramesBefore) {
-                        FrameGenerator.recreateSurface(net.minecraft.client.Minecraft.getInstance());
-                    }
+                    FrameGenerator.afterConfigSaved(net.minecraft.client.Minecraft.getInstance());
                 });
         ConfigEntryBuilder e = builder.entryBuilder();
 

@@ -287,6 +287,17 @@ public final class FrameGenerator {
      * Have vanilla recreate the swapchain at the next loop, as it does after a failed acquire.
      * (Invalid alone only stops acquiring and presenting: nothing would ever reconfigure it.)
      */
+    /** The frames per real frame the Vulkan swapchain was last sized for; -1 before the first one (or on OpenGL). */
+    public static volatile int surfaceFrames = -1;
+
+    /** After a settings screen saved: drop generated frames, and resize the swapchain if the multiplier changed. */
+    public static void afterConfigSaved(Minecraft mc) {
+        INSTANCE.invalidate();
+        if (surfaceFrames >= 0 && VFrameGen.config().maxFramesPerReal() != surfaceFrames) {
+            recreateSurface(mc);
+        }
+    }
+
     public static void recreateSurface(Minecraft mc) {
         MinecraftAccessor acc = (MinecraftAccessor) mc;
         acc.vframegen$setSurfaceIsInvalid(true);

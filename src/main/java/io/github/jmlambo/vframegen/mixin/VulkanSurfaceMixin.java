@@ -82,6 +82,7 @@ public abstract class VulkanSurfaceMixin {
      */
     @ModifyExpressionValue(method = "configure", at = @At(value = "INVOKE", target = "Ljava/lang/Math;max(II)I"))
     private int vframegen$moreImages(int count, @Local VkSurfaceCapabilitiesKHR caps) {
+        io.github.jmlambo.vframegen.FrameGenerator.surfaceFrames = io.github.jmlambo.vframegen.VFrameGen.config().maxFramesPerReal();
         if (!PresentThread.enabled()) {
             PresentThread.setImageCount(count); // kept current even while the option is off
             return count;

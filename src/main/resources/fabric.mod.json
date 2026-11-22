@@ -24,6 +24,9 @@
     ],
     "controlify": [
       "io.github.jmlambo.vframegen.ControlifyIntegration"
+    ],
+    "sodium:config_api_user": [
+      "io.github.jmlambo.vframegen.SodiumIntegration"
     ]
   },
   "mixins": [
@@ -38,6 +41,7 @@
   "suggests": {
     "cloth-config": "*",
     "modmenu": "*",
-    "controlify": "*"
+    "controlify": "*",
+    "sodium": "*"
   }
 }
