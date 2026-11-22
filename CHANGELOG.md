@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Temporal upscaling (Upscaler: Temporal): the world renders with a sub-pixel jitter that changes
+  every frame, and a full-resolution history accumulates the samples (reprojected with depth, clipped
+  to the current frame's colours so changes don't ghost). Cleaner edges than the spatial upscalers,
+  and it anti-aliases (FXAA/SMAA are skipped), also at 100% render scale. The terrain sampler gets a
+  matching mip bias. Shaders off only for now (edge-adaptive with a pack). The Quality preset uses it.
+
 - An unreadable config file is no longer lost: a copy (vframegen.properties.broken-<time>) is kept
   before settings are first saved over it; if the copy can't be made, that save is skipped.
 

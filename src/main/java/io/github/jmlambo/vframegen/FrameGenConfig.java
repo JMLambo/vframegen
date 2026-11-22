@@ -14,7 +14,7 @@ public final class FrameGenConfig {
     public enum Mode { INTERPOLATED, LOW_LATENCY }
     public enum DepthMode { AUTO, DEPTH, ROTATION_ONLY }
     public enum Pacing { OFF, BALANCED }
-    public enum Upscaler { BICUBIC, EDGE_ADAPTIVE }
+    public enum Upscaler { BICUBIC, EDGE_ADAPTIVE, TEMPORAL }
     public enum AntiAliasingMode { OFF, FXAA, SMAA }
 
     public static final int MAX_MULTIPLIER = 6;
@@ -108,9 +108,12 @@ public final class FrameGenConfig {
             dynamicRenderScale      lower the render scale (50% to 100%, renderScale unused) when real frames are
                                     too slow for targetFps (half of it while frame generation is on, or targetFps /
                                     multiplier with a fixed multiplier), and raise it again with room to spare.
-            upscaler                BICUBIC or EDGE_ADAPTIVE. BICUBIC: Catmull-Rom with contrast-adaptive
+            upscaler                BICUBIC, EDGE_ADAPTIVE or TEMPORAL. BICUBIC: Catmull-Rom with contrast-adaptive
                                     sharpening. EDGE_ADAPTIVE: FSR 1 style (EASU + RCAS), sharper
-                                    edges without jaggies, a little more GPU time.
+                                    edges without jaggies, a little more GPU time. TEMPORAL: builds
+                                    full-resolution detail from several jittered frames (also
+                                    anti-aliases, even at 100% render scale; FXAA/SMAA are skipped);
+                                    edge-adaptive while a shader pack is on.
             upscaleSharpness        0 to 1: contrast-adaptive sharpening after the upscale.
             debugTint               tint generated frames magenta, to see which frames are generated.
             debugCaptures           F8 (or the controller button) saves the next frames as images.
