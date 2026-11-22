@@ -128,6 +128,12 @@ public final class FrameGenConfig {
         FrameGenConfig c = new FrameGenConfig();
         Path p = path();
         boolean readFailed = false;
+        if (!Files.exists(p) && !Files.notExists(p)) {
+            // Can't tell whether it exists (e.g. no access): not a fresh install, and not ours to replace.
+            VFrameGen.LOGGER.warn("Could not check {}, using defaults without overwriting it", p);
+            c.firstRunPending = false;
+            return c;
+        }
         if (Files.exists(p)) {
             // An existing config, even one that can't be read, is never replaced by first-run setup.
             c.firstRunPending = false;
