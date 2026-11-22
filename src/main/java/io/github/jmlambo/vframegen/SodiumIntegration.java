@@ -30,6 +30,9 @@ public final class SodiumIntegration implements ConfigEntryPoint {
             if (pickedPreset != null) {
                 Presets.apply(cfg, pickedPreset);
                 pickedPreset = null;
+                // The page still shows the values from before the preset: reload them, once
+                // Sodium is done applying.
+                Minecraft.getInstance().execute(SodiumIntegration::reloadPage);
             }
             cfg.save();
             FrameGenerator.afterConfigSaved(Minecraft.getInstance());
@@ -130,6 +133,16 @@ public final class SodiumIntegration implements ConfigEntryPoint {
                 .setName("VFrameGen")
                 .setNonTintedIcon(Identifier.fromNamespaceAndPath(VFrameGen.MOD_ID, "icon.png"))
                 .addPage(page);
+    }
+
+    private static void reloadPage() {
+        try {
+            var config = net.caffeinemc.mods.sodium.client.config.ConfigManager.CONFIG;
+            if (config != null) config.resetAllOptionsFromBindings();
+        } catch (RuntimeException | LinkageError e) {
+            // Sodium internals: if they change, the page just updates when reopened.
+            VFrameGen.LOGGER.debug("Could not refresh Sodium's options page", e);
+        }
     }
 
     private static net.caffeinemc.mods.sodium.api.config.structure.BooleanOptionBuilder bool(
