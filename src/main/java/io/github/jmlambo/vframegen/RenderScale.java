@@ -282,6 +282,44 @@ public final class RenderScale {
         }
     }
 
+    private static GpuBuffer generatedUbo;
+
+    /**
+     * Upscale a generated frame drawn at the render scale (src, srcW x srcH) into dst (dstW x dstH),
+     * with the same upscaler and sharpening as the real frames: bicubic + sharpen, or EASU + RCAS
+     * (edge-adaptive). tmp is a dst-sized texture for the step between. Its own uniform buffer, so it
+     * never overwrites the real frames' while those are still in flight.
+     */
+    public static void upscaleGenerated(CommandEncoder encoder, GpuTextureView src, int srcW, int srcH,
+                                        GpuTextureView tmp, GpuTextureView dst, int dstW, int dstH,
+                                        GpuFormat format, boolean edgeAdaptive) {
+        GpuDevice device = RenderSystem.getDevice();
+        if (generatedUbo == null) {
+            generatedUbo = device.createBuffer(() -> "VFrameGen generated upscale uniforms", GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, UBO_SIZE);
+        }
+        float sharp = (float) Math.max(0.0, Math.min(1.0, VFrameGen.config().upscaleSharpness));
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            encoder.writeToBuffer(generatedUbo.slice(), Std140Builder.onStack(stack, UBO_SIZE)
+                    .putVec4(1f / srcW, 1f / srcH, srcW, srcH)
+                    .putVec4(1f / dstW, 1f / dstH, sharp, 0f)
+                    .get());
+        }
+        GpuSampler linear = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);
+        GpuSampler nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
+        try (RenderPass pass = encoder.createRenderPass(() -> "VFrameGen generated upscale", tmp, Optional.empty())) {
+            pass.setPipeline(RenderSystem.getCompiledPipeline(pipeline(edgeAdaptive ? "easu" : "upscale", format)));
+            pass.setUniform("Source", src, edgeAdaptive ? nearest : linear);
+            pass.setUniform("Upscale", generatedUbo);
+            pass.draw(3, 1, 0, 0);
+        }
+        try (RenderPass pass = encoder.createRenderPass(() -> "VFrameGen generated sharpen", dst, Optional.empty())) {
+            pass.setPipeline(RenderSystem.getCompiledPipeline(pipeline(edgeAdaptive ? "rcas" : "sharpen", format)));
+            pass.setUniform("Source", tmp, nearest);
+            pass.setUniform("Upscale", generatedUbo);
+            pass.draw(3, 1, 0, 0);
+        }
+    }
+
     private static RenderPipeline pipeline(String shader, GpuFormat format) {
         String key = shader + "_" + format.name().toLowerCase(Locale.ROOT);
         return pipelines.computeIfAbsent(key, k -> RenderPipeline.builder()
