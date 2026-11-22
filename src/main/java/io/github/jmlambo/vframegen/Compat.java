@@ -33,4 +33,35 @@ public final class Compat {
             return false;
         }
     }
+
+    private static java.lang.reflect.Field irisRenderTargets;
+    private static java.lang.reflect.Method irisNoTranslucents;
+    private static boolean irisDepthLookupFailed;
+
+    /**
+     * The shader pack's depth from before translucents (what packs read as depthtex1), or null.
+     * Iris internals, so looked up by reflection and given up on quietly if they change.
+     */
+    public static com.mojang.renderpearl.api.textures.GpuTexture irisDepthNoTranslucents() {
+        if (!IRIS || irisDepthLookupFailed) return null;
+        try {
+            Object pipeline = Class.forName("net.irisshaders.iris.Iris").getMethod("getPipelineManager").invoke(null);
+            pipeline = pipeline.getClass().getMethod("getPipelineNullable").invoke(pipeline);
+            if (pipeline == null) return null;
+            if (irisRenderTargets == null) {
+                Class<?> irisPipeline = Class.forName("net.irisshaders.iris.pipeline.IrisRenderingPipeline");
+                irisRenderTargets = irisPipeline.getDeclaredField("renderTargets");
+                irisRenderTargets.setAccessible(true);
+                irisNoTranslucents = Class.forName("net.irisshaders.iris.targets.RenderTargets")
+                        .getMethod("getDepthTextureNoTranslucents");
+            }
+            if (!irisRenderTargets.getDeclaringClass().isInstance(pipeline)) return null;
+            Object targets = irisRenderTargets.get(pipeline);
+            return targets == null ? null : (com.mojang.renderpearl.api.textures.GpuTexture) irisNoTranslucents.invoke(targets);
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+            irisDepthLookupFailed = true;
+            VFrameGen.LOGGER.warn("Could not read Iris' depth before translucents; blocks behind water may shake with shaders", e);
+            return null;
+        }
+    }
 }
