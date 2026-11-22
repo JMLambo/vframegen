@@ -76,6 +76,7 @@ public final class RenderScale {
      */
     public static void upscaleAndSwap(GameRenderer gr, int windowW, int windowH) {
         if (swappedTarget != null || broken) return;
+        shownTarget = null; // set again only once this frame's picture is in the full-size textures
         // Until the first resource reload is done, only vanilla's shaders can load, and every
         // failed try logs a "Couldn't preload shader" stack trace.
         if (RenderSystemAccessor.vframegen$getCurrentPipelineCache() == null) return;
@@ -101,6 +102,15 @@ public final class RenderScale {
             }
             return;
         }
+        swapIn(main, windowW, windowH);
+        shownTarget = main;
+    }
+
+    // The main target the full-size textures were last swapped into (they keep that frame's
+    // finished picture, GUI included, until the next frame is upscaled).
+    private static RenderTarget shownTarget;
+
+    private static void swapIn(RenderTarget main, int windowW, int windowH) {
         RenderTargetAccessor acc = (RenderTargetAccessor) main;
         savedColor = acc.vframegen$getColorTexture();
         savedColorView = acc.vframegen$getColorTextureView();
@@ -125,6 +135,25 @@ public final class RenderScale {
     /** The world's depth as rendered (the low-resolution texture while swapped). */
     public static GpuTexture worldDepth(RenderTarget main) {
         return main == swappedTarget ? savedDepth : main.getDepthTexture();
+    }
+
+    /**
+     * Screenshots (F2) are taken between frames, when the main target has its own low-resolution
+     * textures back (the world, without the GUI): swap the last finished full-size picture in
+     * while the screenshot reads it.
+     */
+    public static void withFinishedPicture(RenderTarget main, Runnable grab) {
+        if (main != shownTarget || swappedTarget != null || displayTex == null || displayTex.isClosed()
+                || (main.width == displayTex.getWidth(0) && main.height == displayTex.getHeight(0))) {
+            grab.run();
+            return;
+        }
+        swapIn(main, displayTex.getWidth(0), displayTex.getHeight(0));
+        try {
+            grab.run(); // records the copy now; the textures keep this frame until the next upscale
+        } finally {
+            restore();
+        }
     }
 
     /** Put the main target's own textures back. */

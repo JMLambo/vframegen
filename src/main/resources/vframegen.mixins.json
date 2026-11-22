@@ -16,6 +16,7 @@
     "MinecraftMixin",
     "RenderSystemAccessor",
     "RenderTargetAccessor",
+    "ScreenshotMixin",
     "VulkanCommandEncoderMixin",
     "VulkanDeviceMixin",
     "VulkanPhysicalDeviceMixin",

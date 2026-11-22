@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Screenshots (F2) with render scale below 100% (for example dynamic render scale with a shader
+  pack) were the small world image without the GUI. They are the full-size picture again.
 - Adaptive frame generation can go up to 8x (fixed multipliers stay at 2x to 6x), for very low
   real frame rates.
 - Adaptive mode asks for fewer generated frames whenever some get dropped (drawn, but no swapchain
