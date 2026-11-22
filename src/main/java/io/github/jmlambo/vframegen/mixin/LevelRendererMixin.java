@@ -37,14 +37,13 @@ public abstract class LevelRendererMixin {
     @Final
     private LevelTargetBundle targets;
 
-    @Shadow
-    protected abstract void executeClassicTransparency(ChunkSectionsToRender chunkSectionsToRender,
-            FeatureRenderDispatcher.PreparedFrame featureFrame, RenderPass renderPass);
-
     @Unique
     private ChunkSectionsToRender vframegen$deferredSections;
     @Unique
     private FeatureRenderDispatcher.PreparedFrame vframegen$deferredFeatures;
+    // The call itself, so other mods' wrappers around it still run (once, with the new pass).
+    @Unique
+    private Operation<Void> vframegen$deferredCall;
 
     @Inject(method = "executeOit", at = @At("HEAD"), require = 0)
     private void vframegen$depthBeforeOit(CallbackInfo ci) {
@@ -63,6 +62,7 @@ public abstract class LevelRendererMixin {
         }
         vframegen$deferredSections = sections;
         vframegen$deferredFeatures = features;
+        vframegen$deferredCall = original;
     }
 
     // The opaque pass is closed by here; executeOit (skipped in classic mode) would come next.
@@ -71,16 +71,18 @@ public abstract class LevelRendererMixin {
     private void vframegen$runDeferredTransparency(CallbackInfo ci) {
         ChunkSectionsToRender sections = vframegen$deferredSections;
         FeatureRenderDispatcher.PreparedFrame features = vframegen$deferredFeatures;
+        Operation<Void> call = vframegen$deferredCall;
         if (sections == null) return;
         vframegen$deferredSections = null;
         vframegen$deferredFeatures = null;
+        vframegen$deferredCall = null;
         FrameGenerator.INSTANCE.captureOpaqueDepth(Minecraft.getInstance().gameRenderer);
         RenderTarget main = targets.main.get();
         try (RenderPass pass = RenderSystem.getDevice().createCommandEncoder().createRenderPass(
                 () -> "Main (translucent)", main.getColorTextureView(), Optional.empty(),
                 main.getDepthTextureView(), OptionalDouble.empty())) {
             RenderSystem.bindDefaultUniforms(pass);
-            executeClassicTransparency(sections, features, pass);
+            call.call((LevelRenderer) (Object) this, sections, features, pass);
         }
     }
 }
