@@ -140,6 +140,8 @@ public final class FrameGenerator {
     private boolean frameProjCaptured;
     private final Matrix4f frameProj = new Matrix4f();
     private boolean frameWorldDepthCaptured;
+    /** The depth was taken before water and other translucents were drawn (captureOpaqueDepth). */
+    private boolean frameOpaqueDepthCaptured;
     private boolean frameHandCaptured;
     private boolean frameWorldCaptured;
     private Present present = Present.VANILLA;
@@ -321,6 +323,7 @@ public final class FrameGenerator {
         PackBlurCheck.tick(mc);
         frameProjCaptured = false;
         frameWorldDepthCaptured = false;
+        frameOpaqueDepthCaptured = false;
         frameHandCaptured = false;
         frameWorldCaptured = false;
         building = null;
@@ -1335,12 +1338,31 @@ public final class FrameGenerator {
         frameProjCaptured = true;
     }
 
+    /** Whether the level renderer should keep the depth from before translucents (see captureOpaqueDepth). */
+    public boolean wantsOpaqueDepth() {
+        return active() && !Compat.irisShadersActive();
+    }
+
+    /**
+     * Right before water and other translucents are drawn: the depth of the opaque world. Generated
+     * frames move each pixel by its depth, and both transparency modes leave the water surface's
+     * depth in the depth buffer, so blocks seen through water moved as if they were at the surface
+     * (several times too far when the surface is close) and snapped back at each real frame. With
+     * this depth they move right; the water surface on top of them is mostly a flat texture.
+     */
+    public void captureOpaqueDepth(GameRenderer gr) {
+        FrameSlot c = prepare(gr);
+        if (c == null) return;
+        frameOpaqueDepthCaptured = copy(gr.mainRenderTarget().getDepthTexture(), c.depth);
+    }
+
     /** Right before the held item is drawn: the depth buffer still has the whole world in it. */
     public void captureWorldDepth(GameRenderer gr) {
         FrameSlot c = prepare(gr);
         if (c == null) return;
         RenderTarget main = gr.mainRenderTarget();
-        frameWorldDepthCaptured = copy(main.getDepthTexture(), c.depth) && copy(main.getColorTexture(), c.noHand);
+        boolean depth = frameOpaqueDepthCaptured || copy(main.getDepthTexture(), c.depth);
+        frameWorldDepthCaptured = depth && copy(main.getColorTexture(), c.noHand);
     }
 
     /** Right after the held item is drawn, into a depth buffer that was cleared for it. */
@@ -1365,7 +1387,8 @@ public final class FrameGenerator {
         if (!frameWorldDepthCaptured) {
             // render3dHud did not run (or another mod replaced it): no separate hand pass. With
             // render scale the world's own (smaller) textures are the swapped-out ones.
-            if (!copy(RenderScale.worldDepth(main), c.depth) || !copy(RenderScale.worldColor(main), c.noHand)) {
+            if (!(frameOpaqueDepthCaptured || copy(RenderScale.worldDepth(main), c.depth))
+                    || !copy(RenderScale.worldColor(main), c.noHand)) {
                 c.valid = false;
                 return;
             }

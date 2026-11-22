@@ -9,6 +9,7 @@
     "GameRendererMixin",
     "GlTransientMemoryMixin",
     "HudMixin",
+    "LevelRendererMixin",
     "MinecraftAccessor",
     "MinecraftMixin",
     "RenderSystemAccessor",
