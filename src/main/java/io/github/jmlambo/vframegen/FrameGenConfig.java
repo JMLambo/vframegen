@@ -45,6 +45,8 @@ public final class FrameGenConfig {
     public float motionBlurStrength = 0.5f;
     public double renderScale = 1.0;
     public boolean dynamicRenderScale = false;
+    /** A fresh install: FirstRunSetup still has to pick a preset. Off for configs from before it existed. */
+    public boolean firstRunPending = true;
     public boolean autoCap = true;
     public boolean presentThread = true;
     public boolean allowVsync = false;
@@ -101,6 +103,8 @@ public final class FrameGenConfig {
             renderScale             0.5 to 1.0: the world (and shader pack) renders at this fraction of the
                                     window size and is upscaled; the GUI stays at full resolution.
                                     0.75 shades about 56% of the pixels.
+            firstRunPending         true on a fresh install: the first few seconds in a world are measured and a
+                                    preset and target frame rate are picked. Set it to true to run that again.
             dynamicRenderScale      lower the render scale (50% to 100%, renderScale unused) when real frames are
                                     too slow for targetFps (half of it while frame generation is on, or targetFps /
                                     multiplier with a fixed multiplier), and raise it again with room to spare.
@@ -124,7 +128,15 @@ public final class FrameGenConfig {
         FrameGenConfig c = new FrameGenConfig();
         Path p = path();
         boolean readFailed = false;
+        if (!Files.exists(p) && !Files.notExists(p)) {
+            // Can't tell whether it exists (e.g. no access): not a fresh install, and not ours to replace.
+            VFrameGen.LOGGER.warn("Could not check {}, using defaults; it is not written at startup, but saving settings will replace it", p);
+            c.firstRunPending = false;
+            return c;
+        }
         if (Files.exists(p)) {
+            // An existing config, even one that can't be read, is never replaced by first-run setup.
+            c.firstRunPending = false;
             Properties props = new Properties();
             try (Reader r = Files.newBufferedReader(p)) {
                 props.load(r);
@@ -160,10 +172,11 @@ public final class FrameGenConfig {
                 c.displayHz = Math.max(0, Math.min(500, (int) dbl(props, "displayHz", c.displayHz)));
                 c.renderScale = Math.clamp(dbl(props, "renderScale", c.renderScale), 0.5, 1.0);
                 c.dynamicRenderScale = bool(props, "dynamicRenderScale", c.dynamicRenderScale);
+                c.firstRunPending = bool(props, "firstRunPending", false);
                 c.upscaler = enumOf(props, "upscaler", c.upscaler, Upscaler.class);
                 c.upscaleSharpness = Math.clamp(dbl(props, "upscaleSharpness", c.upscaleSharpness), 0.0, 1.0);
             } catch (IOException | RuntimeException e) {
-                VFrameGen.LOGGER.warn("Could not read {}, using defaults without overwriting it", p, e);
+                VFrameGen.LOGGER.warn("Could not read {}, using defaults; it is not written at startup, but saving settings will replace it", p, e);
                 readFailed = true;
             }
         }
@@ -202,6 +215,7 @@ public final class FrameGenConfig {
         values.put("displayHz", Integer.toString(displayHz));
         values.put("renderScale", Double.toString(renderScale));
         values.put("dynamicRenderScale", Boolean.toString(dynamicRenderScale));
+        values.put("firstRunPending", Boolean.toString(firstRunPending));
         values.put("upscaleSharpness", Double.toString(upscaleSharpness));
         values.put("upscaler", upscaler.name());
         StringBuilder out = new StringBuilder();

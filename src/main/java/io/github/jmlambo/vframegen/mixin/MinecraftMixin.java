@@ -57,6 +57,7 @@ public abstract class MinecraftMixin {
             target = "Lnet/minecraft/client/renderer/state/GameRenderState;framerateLimit:I"))
     private int vframegen$frameLimit(int limit) {
         io.github.jmlambo.vframegen.DynamicScale.workDone((Minecraft) (Object) this);
+        io.github.jmlambo.vframegen.FirstRunSetup.workDone((Minecraft) (Object) this);
         return FrameGenerator.INSTANCE.frameLimit((Minecraft) (Object) this, limit);
     }
 
