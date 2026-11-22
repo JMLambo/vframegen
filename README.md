@@ -76,6 +76,11 @@ between the one on screen (A) and the held one (B) are built from both, then B i
    bounding box, never their model, so it works the same with model mods such as Entity Model
    Features and Fresh Animations.
 5. The held item and the GUI are not warped. They come from the frame nearer in time.
+6. **Optical flow** (beta, on by default) measures how the picture actually moved between the two
+   frames. Where it differs from what depth predicted (mob limbs, fire, particles, water, animated
+   textures), generated frames follow it too, wherever the forward and backward measurements
+   agree. NVIDIA RTX cards on Vulkan use their optical flow hardware; other GPUs use a shader
+   version (experimental).
 
 **Adaptive frame generation** (off by default). Instead of a fixed multiplier, VFrameGen picks
 how many frames to show per real frame (1 to 8, two more than a fixed multiplier) so that real and generated frames together reach a
@@ -150,11 +155,11 @@ Frame generation makes motion smoother; it does not make the game itself run fas
 **General → Preset** (also on the Sodium page) sets frame generation, render scale, upscaling and
 anti-aliasing together. Changing any of them by hand shows **Custom**.
 
-| Preset | Frame generation | Render scale | Upscaler | Anti-aliasing |
-|---|---|---|---|---|
-| Low-end | adaptive | dynamic | bicubic | FXAA |
-| Balanced | adaptive | dynamic | edge-adaptive (FSR 1) | SMAA |
-| Quality | adaptive | 100% | temporal (TAA) | from the temporal upscaler |
+| Preset | Frame generation | Render scale | Upscaler | Anti-aliasing | Optical flow |
+|---|---|---|---|---|---|
+| Low-end | adaptive | dynamic | bicubic | FXAA | left as set |
+| Balanced | adaptive | dynamic | edge-adaptive (FSR 1) | SMAA | left as set |
+| Quality | adaptive | 100% | temporal (TAA) | from the temporal upscaler | on |
 
 ## Render scale
 
@@ -195,8 +200,9 @@ Toggle key: **F9** (rebind under Controls → VFrameGen).
 - **Upscaling**: dynamic render scale, render scale, upscaler (bicubic, edge-adaptive or temporal)
   and sharpening.
 - **Limits**: when not to generate frames (camera jumps, fast turns, very slow real frames).
-- **Quality**: sharpening of generated frames, anti-aliasing and its quality, motion blur, GUI
-  detection threshold.
+- **Quality**: sharpening of generated frames, anti-aliasing and its quality, motion blur, optical
+  flow (beta; its tooltip says whether your GPU uses hardware or the experimental shader version),
+  GUI detection threshold.
 - **Debug** (all off by default): a magenta tint on generated frames, F8 captures (images and
   validation frames go to `vframegen-debug/`), a rolling log of the last ~10 s of presented frames,
   and stats, pacing and stall lines in the game log.
@@ -225,7 +231,8 @@ frames.
   happen with it off. See [Tips](#tips).
 - Disocclusions (what was hidden behind something) are filled from neighbouring pixels, so fast
   sideways motion can smear edges a little. Things that move on their own without moving as a
-  whole (waving leaves, water, swinging limbs) are only as smooth as the real frames.
+  whole (waving leaves, water, swinging limbs) are only as smooth as the real frames, unless
+  optical flow is on; the shader version (GPUs without optical flow hardware) is less precise.
 - Entity motion only works in interpolated mode (low-latency mode has no next frame to take it
   from).
 - The temporal upscaler is for shaders off (it uses edge-adaptive with a shader pack), and fast
