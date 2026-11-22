@@ -19,16 +19,28 @@ import java.util.function.Supplier;
  * (limits, reprojection, debug) stay in the full settings screen, linked from the page.
  */
 public final class SodiumIntegration implements ConfigEntryPoint {
+    private Presets.Preset pickedPreset;
+
     @Override
     public void registerConfigLate(ConfigBuilder b) {
         FrameGenConfig cfg = VFrameGen.config();
         FrameGenConfig def = new FrameGenConfig();
         StorageEventHandler storage = () -> {
+            // A preset picked: it wins over the individual settings saved with it.
+            if (pickedPreset != null) {
+                Presets.apply(cfg, pickedPreset);
+                pickedPreset = null;
+            }
             cfg.save();
             FrameGenerator.afterConfigSaved(Minecraft.getInstance());
         };
 
         OptionGroupBuilder general = b.createOptionGroup()
+                .addOption(b.createEnumOption(id("preset"), Presets.Preset.class)
+                        .setName(t("preset")).setTooltip(tip("preset"))
+                        .setElementNameProvider(v -> enumName("preset", v))
+                        .setDefaultValue(Presets.Preset.CUSTOM).setStorageHandler(storage)
+                        .setBinding(v -> pickedPreset = v == Presets.match(cfg) ? null : v, () -> Presets.match(cfg)))
                 .addOption(bool(b, storage, "enabled", def.enabled, v -> cfg.enabled = v, () -> cfg.enabled)
                         .setImpact(OptionImpact.MEDIUM))
                 .addOption(bool(b, storage, "adaptive", def.adaptive, v -> cfg.adaptive = v, () -> cfg.adaptive))

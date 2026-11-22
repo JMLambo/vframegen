@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Presets (General, on the Sodium page too): Low-end, Balanced and Quality set frame generation,
+  render scale, upscaling and anti-aliasing together; changing any of them by hand shows Custom.
+
 - Dynamic render scale (Upscaling, off by default): lowers the render scale (down to 50%) when real
   frames are too slow for the target frame rate, and raises it again when there is room, in 5% steps
   (at most 15% at a time, at most every two seconds). It shares the target frame rate with adaptive

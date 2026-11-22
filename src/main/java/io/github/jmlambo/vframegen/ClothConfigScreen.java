@@ -17,16 +17,24 @@ final class ClothConfigScreen {
         FrameGenConfig cfg = VFrameGen.config();
         FrameGenConfig def = new FrameGenConfig();
 
+        Presets.Preset presetAtOpen = Presets.match(cfg);
+        Presets.Preset[] pickedPreset = {presetAtOpen};
         ConfigBuilder builder = ConfigBuilder.create()
                 .setParentScreen(parent)
                 .setTitle(Component.translatable("vframegen.config.title"))
                 .setSavingRunnable(() -> {
+                    // A preset picked: it wins over the individual settings saved with it.
+                    if (pickedPreset[0] != presetAtOpen) Presets.apply(cfg, pickedPreset[0]);
                     cfg.save();
                     FrameGenerator.afterConfigSaved(net.minecraft.client.Minecraft.getInstance());
                 });
         ConfigEntryBuilder e = builder.entryBuilder();
 
         ConfigCategory general = builder.getOrCreateCategory(Component.translatable("vframegen.config.general"));
+        general.addEntry(e.startEnumSelector(t("preset"), Presets.Preset.class, presetAtOpen)
+                .setDefaultValue(presetAtOpen).setTooltip(tip("preset"))
+                .setEnumNameProvider(v -> Component.translatable("vframegen.config.preset." + v.name().toLowerCase(java.util.Locale.ROOT)))
+                .setSaveConsumer(v -> pickedPreset[0] = v).build());
         general.addEntry(e.startBooleanToggle(t("enabled"), cfg.enabled)
                 .setDefaultValue(def.enabled).setTooltip(tip("enabled"))
                 .setSaveConsumer(v -> cfg.enabled = v).build());
