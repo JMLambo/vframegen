@@ -43,7 +43,8 @@ final class FrameSlot {
         world = device.createTexture("VFrameGen " + name + " world", sampled, color, w, h, 1, 1);
         noHand = device.createTexture("VFrameGen " + name + " world without hand", sampled, color, rw, rh, 1, 1);
         finalImage = device.createTexture("VFrameGen " + name + " final", sampled, color, w, h, 1, 1);
-        depth = device.createTexture("VFrameGen " + name + " depth", sampled, depthFormat, rw, rh, 1, 1);
+        // Also a render target: with a shader pack it is drawn from Iris' depth (not copyable).
+        depth = device.createTexture("VFrameGen " + name + " depth", sampled | GpuTexture.USAGE_RENDER_ATTACHMENT, depthFormat, rw, rh, 1, 1);
         handDepth = device.createTexture("VFrameGen " + name + " hand depth", sampled, depthFormat, rw, rh, 1, 1);
         mask = device.createTexture("VFrameGen " + name + " hand mask",
                 GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING, GpuFormat.RGBA8_UNORM, w, h, 1, 1);

@@ -5,6 +5,7 @@ import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.mojang.renderpearl.api.textures.GpuTextureView;
 import net.minecraft.client.renderer.DebugCrosshairRenderer;
+import io.github.jmlambo.vframegen.AntiAliasing;
 import io.github.jmlambo.vframegen.FrameGenerator;
 import io.github.jmlambo.vframegen.RenderScale;
 import net.minecraft.client.renderer.state.WindowRenderState;
@@ -62,6 +63,7 @@ public abstract class GameRendererMixin {
         GameRenderer gr = (GameRenderer) (Object) this;
         WindowRenderState window = gr.gameRenderState().windowRenderState;
         RenderScale.upscaleAndSwap(gr, window.width, window.height);
+        AntiAliasing.apply(gr);
         FrameGenerator.INSTANCE.captureWorld(gr);
     }
 
