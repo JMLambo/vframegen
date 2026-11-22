@@ -1,7 +1,8 @@
 name: Release
 
 # Push a tag like v0.2.0 (matching mod_version in gradle.properties) to build the mod and publish
-# a GitHub Release with the jar attached and notes generated from the commits since the last one.
+# a GitHub Release with the jar attached and notes generated from the commits since the last one,
+# then upload the same jar to CurseForge (needs the CURSEFORGE_TOKEN secret; skipped without it).
 on:
   push:
     tags: ['v*']
@@ -49,3 +50,59 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" build/libs/*.jar \
             --title "VFrameGen ${GITHUB_REF_NAME#v}" \
             --generate-notes --verify-tag ${prerelease}
+
+      - name: Upload to CurseForge
+        env:
+          CF_TOKEN: ${{ secrets.CURSEFORGE_TOKEN }}
+          CF_PROJECT: '1822851'
+        run: |
+          if [ -z "${CF_TOKEN}" ]; then
+            echo "::warning::CURSEFORGE_TOKEN is not set; skipping the CurseForge upload"
+            exit 0
+          fi
+          version="${GITHUB_REF_NAME#v}"
+          mc=$(grep -E '^minecraft_version=' gradle.properties | cut -d= -f2 | tr -d '[:space:]')
+          jar=$(ls build/libs/*.jar | grep -v -- '-sources\.jar$' | head -n1)
+          api=https://minecraft.curseforge.com/api
+
+          # Release type from the version: alphas and betas stay off the default file list.
+          case "${version}" in
+            *-alpha*) type=alpha ;;
+            *-*) type=beta ;; # beta, rc and any other suffix: never a default download
+            *) type=release ;;
+          esac
+
+          # Display name like "VFrameGen 1.0 Beta 1" (or "VFrameGen 1.2.0" for a release).
+          base="${version%%-*}"
+          name="VFrameGen ${version}"
+          case "${version}" in
+            *-beta.*) name="VFrameGen ${base%.0} Beta ${version##*-beta.}" ;;
+            *-alpha.*) name="VFrameGen ${base%.0} Alpha ${version##*-alpha.}" ;;
+          esac
+
+          # This version's CHANGELOG.md section (between its heading and the next one).
+          changelog=$(awk -v v="${version}" '
+            $0 ~ "^## \\[?" v "([] ]|$)" { f = 1; next }
+            /^## / { if (f) exit }
+            f' CHANGELOG.md)
+          [ -n "${changelog}" ] || changelog="See https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}"
+
+          # CurseForge wants numeric ids for the game version, loader, Java and environment tags.
+          curl -sfS -H "X-Api-Token: ${CF_TOKEN}" "${api}/game/versions" > versions.json
+          ids=$(jq -c --arg mc "${mc}" '
+            [ .[] | select(.name == $mc or .name == "Fabric" or .name == "Java 25" or .name == "Client") | .id ]
+            | unique' versions.json)
+          if [ "$(echo "${ids}" | jq length)" -ne 4 ]; then
+            echo "::error::Expected exactly one CurseForge tag each for (${mc}, Fabric, Java 25, Client): ${ids}"
+            exit 1
+          fi
+
+          metadata=$(jq -n \
+            --arg changelog "${changelog}" --arg name "${name}" --arg type "${type}" --argjson ids "${ids}" \
+            '{changelog: $changelog, changelogType: "markdown", displayName: $name, releaseType: $type,
+              gameVersions: $ids,
+              relations: {projects: [{slug: "fabric-api", type: "requiredDependency"}]}}')
+          curl -sfS -H "X-Api-Token: ${CF_TOKEN}" \
+            --form-string "metadata=${metadata}" -F "file=@${jar}" \
+            "${api}/projects/${CF_PROJECT}/upload-file"
+          echo
