@@ -24,6 +24,7 @@ public abstract class MinecraftMixin {
     @Inject(method = "renderFrame", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/DeltaTracker$Timer;advanceRealTime(J)V"))
     private void vframegen$loopStart(boolean advanceGameTime, CallbackInfo ci) {
         RenderScale.restore();
+        io.github.jmlambo.vframegen.DynamicScale.loopStart();
         FrameGenerator.INSTANCE.loopStart((Minecraft) (Object) this);
     }
 
@@ -55,6 +56,7 @@ public abstract class MinecraftMixin {
             opcode = org.objectweb.asm.Opcodes.GETFIELD,
             target = "Lnet/minecraft/client/renderer/state/GameRenderState;framerateLimit:I"))
     private int vframegen$frameLimit(int limit) {
+        io.github.jmlambo.vframegen.DynamicScale.workDone((Minecraft) (Object) this);
         return FrameGenerator.INSTANCE.frameLimit((Minecraft) (Object) this, limit);
     }
 
