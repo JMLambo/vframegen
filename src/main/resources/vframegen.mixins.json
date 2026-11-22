@@ -10,6 +10,7 @@
     "GlSamplerMixin",
     "GlTransientMemoryMixin",
     "HudMixin",
+    "IrisPipelineMixin",
     "LevelRendererMixin",
     "MinecraftAccessor",
     "MinecraftMixin",

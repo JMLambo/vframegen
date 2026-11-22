@@ -1,5 +1,6 @@
 package io.github.jmlambo.vframegen.mixin;
 
+import io.github.jmlambo.vframegen.DeferredSolidAccess;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.mojang.blaze3d.pipeline.RenderTarget;
@@ -33,7 +34,7 @@ import java.util.OptionalDouble;
  * it, with the same targets and state, and the depth is copied in between.
  */
 @Mixin(LevelRenderer.class)
-public abstract class LevelRendererMixin {
+public abstract class LevelRendererMixin implements DeferredSolidAccess {
     @Shadow
     @Final
     private LevelTargetBundle targets;
@@ -74,8 +75,45 @@ public abstract class LevelRendererMixin {
         }
     }
 
+    @Unique
+    private FeatureRenderDispatcher.PreparedFrame vframegen$deferredSolid;
+    @Unique
+    private Operation<Void> vframegen$deferredSolidCall;
+
+    // Entities and other solid features are drawn in a pass of their own, after the terrain's, so
+    // the depth of the terrain alone can be kept in between (FrameGenerator.captureTerrainDepth).
+    @WrapOperation(method = "executeSolid", require = 0, at = @At(value = "INVOKE",
+            target = "Lnet/minecraft/client/renderer/feature/FeatureRenderDispatcher$PreparedFrame;executeSolid(Lcom/mojang/renderpearl/api/commands/RenderPass;)V"))
+    private void vframegen$deferSolidFeatures(FeatureRenderDispatcher.PreparedFrame features, RenderPass pass,
+            Operation<Void> original) {
+        if (!FrameGenerator.INSTANCE.wantsTerrainDepth()) {
+            original.call(features, pass);
+            return;
+        }
+        vframegen$deferredSolid = features;
+        vframegen$deferredSolidCall = original;
+    }
+
+    @Override
+    public void vframegen$runDeferredSolid() {
+        FeatureRenderDispatcher.PreparedFrame features = vframegen$deferredSolid;
+        Operation<Void> call = vframegen$deferredSolidCall;
+        if (features == null) return;
+        vframegen$deferredSolid = null;
+        vframegen$deferredSolidCall = null;
+        FrameGenerator.INSTANCE.captureTerrainDepth(Minecraft.getInstance().gameRenderer);
+        RenderTarget main = targets.main.get();
+        try (RenderPass pass = RenderSystem.getDevice().createCommandEncoder().createRenderPass(
+                () -> "Solid features", main.getColorTextureView(), Optional.empty(),
+                main.getDepthTextureView(), OptionalDouble.empty())) {
+            RenderSystem.bindDefaultUniforms(pass);
+            call.call(features, pass);
+        }
+    }
+
     @Inject(method = "executeOit", at = @At("HEAD"), require = 0)
     private void vframegen$depthBeforeOit(CallbackInfo ci) {
+        vframegen$runDeferredSolid();
         if (FrameGenerator.INSTANCE.wantsOpaqueDepth()) {
             FrameGenerator.INSTANCE.captureOpaqueDepth(Minecraft.getInstance().gameRenderer);
         }
@@ -98,6 +136,7 @@ public abstract class LevelRendererMixin {
     @Inject(method = "lambda$addMainPass$0", require = 0, at = @At(value = "INVOKE",
             target = "Lnet/minecraft/client/renderer/LevelRenderer;executeOutline(Lnet/minecraft/client/renderer/feature/FeatureRenderDispatcher$PreparedFrame;)V"))
     private void vframegen$runDeferredTransparency(CallbackInfo ci) {
+        vframegen$runDeferredSolid();
         ChunkSectionsToRender sections = vframegen$deferredSections;
         FeatureRenderDispatcher.PreparedFrame features = vframegen$deferredFeatures;
         Operation<Void> call = vframegen$deferredCall;

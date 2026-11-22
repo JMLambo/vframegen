@@ -14,8 +14,10 @@ import org.joml.Vector3d;
 final class FrameSlot {
     final String name;
 
-    GpuTexture world, noHand, depth, handDepth, finalImage, mask;
-    GpuTextureView worldView, noHandView, depthView, handDepthView, finalView, maskView;
+    GpuTexture world, noHand, depth, handDepth, finalImage, mask, terrainDepth;
+    GpuTextureView worldView, noHandView, depthView, handDepthView, finalView, maskView, terrainDepthView;
+    /** terrainDepth holds this frame's depth from before entities were drawn. */
+    boolean hasTerrainDepth;
 
     /** Images and camera are complete (world captured and the final image copied). */
     boolean valid;
@@ -52,6 +54,8 @@ final class FrameSlot {
         // Also a render target: with a shader pack it is drawn from Iris' depth (not copyable).
         depth = device.createTexture("VFrameGen " + name + " depth", sampled | GpuTexture.USAGE_RENDER_ATTACHMENT, depthFormat, rw, rh, 1, 1);
         handDepth = device.createTexture("VFrameGen " + name + " hand depth", sampled, depthFormat, rw, rh, 1, 1);
+        terrainDepth = device.createTexture("VFrameGen " + name + " depth before entities", sampled, depthFormat, rw, rh, 1, 1);
+        terrainDepthView = device.createTextureView(terrainDepth);
         mask = device.createTexture("VFrameGen " + name + " hand mask",
                 GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING, GpuFormat.RGBA8_UNORM, w, h, 1, 1);
         maskView = device.createTextureView(mask);
@@ -65,14 +69,15 @@ final class FrameSlot {
     }
 
     void release() {
-        for (GpuTextureView v : new GpuTextureView[]{worldView, noHandView, finalView, depthView, handDepthView, maskView}) {
+        for (GpuTextureView v : new GpuTextureView[]{worldView, noHandView, finalView, depthView, handDepthView, maskView, terrainDepthView}) {
             if (v != null) v.close();
         }
-        for (GpuTexture t : new GpuTexture[]{world, noHand, finalImage, depth, handDepth, mask}) {
+        for (GpuTexture t : new GpuTexture[]{world, noHand, finalImage, depth, handDepth, mask, terrainDepth}) {
             if (t != null) t.close();
         }
-        worldView = noHandView = finalView = depthView = handDepthView = maskView = null;
-        world = noHand = finalImage = depth = handDepth = mask = null;
+        worldView = noHandView = finalView = depthView = handDepthView = maskView = terrainDepthView = null;
+        world = noHand = finalImage = depth = handDepth = mask = terrainDepth = null;
+        hasTerrainDepth = false;
         valid = false;
         hasFinal = false;
     }

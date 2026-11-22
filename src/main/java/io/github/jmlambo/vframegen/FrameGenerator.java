@@ -143,6 +143,8 @@ public final class FrameGenerator {
     private boolean frameWorldDepthCaptured;
     /** The depth was taken before water and other translucents were drawn (captureOpaqueDepth). */
     private boolean frameOpaqueDepthCaptured;
+    /** The depth was also taken before entities were drawn (captureTerrainDepth). */
+    private boolean frameTerrainDepthCaptured;
     private boolean frameHandCaptured;
     private boolean frameWorldCaptured;
     private Present present = Present.VANILLA;
@@ -325,6 +327,7 @@ public final class FrameGenerator {
         frameProjCaptured = false;
         frameWorldDepthCaptured = false;
         frameOpaqueDepthCaptured = false;
+        frameTerrainDepthCaptured = false;
         frameHandCaptured = false;
         frameWorldCaptured = false;
         building = null;
@@ -1166,7 +1169,7 @@ public final class FrameGenerator {
             // Moving entities: only between two real frames (interpolated), where both positions are known.
             int countA = b != null ? putEntities(null, a, b, t, dstViewProjRot, dstPos) : 0;
             int countB = b != null ? putEntities(null, b, a, 1f - t, dstViewProjRot, dstPos) : 0;
-            ub.putVec4(countA, countB, 0f, 0f);
+            ub.putVec4(countA, countB, a.hasTerrainDepth ? 1f : 0f, (b != null ? b : a).hasTerrainDepth ? 1f : 0f);
             putEntities(ub, a, b, t, dstViewProjRot, dstPos);
             putEntities(ub, b != null ? b : a, b != null ? a : null, 1f - t, dstViewProjRot, dstPos);
             ByteBuffer data = ub.get();
@@ -1285,6 +1288,31 @@ public final class FrameGenerator {
     private final double[] nearDist = new double[FrameSlot.MAX_ENTITIES];
     private final float[] nearTick = new float[FrameSlot.MAX_ENTITIES];
 
+    private static final double ENTITY_SIDE_PAD = 0.3;
+
+    /**
+     * How far an entity's box may reach past its hitbox on one side (axis 0 = x, 2 = z; dir -1 or
+     * 1): ENTITY_SIDE_PAD, or less when a block is nearer, stopping just short of its face.
+     */
+    private static double sidePad(Minecraft mc, net.minecraft.world.entity.Entity e,
+            net.minecraft.world.phys.AABB hb, int axis, int dir) {
+        double edge = axis == 0 ? (dir > 0 ? hb.maxX : hb.minX) : (dir > 0 ? hb.maxZ : hb.minZ);
+        double lo = dir > 0 ? edge : edge - ENTITY_SIDE_PAD, hi = dir > 0 ? edge + ENTITY_SIDE_PAD : edge;
+        net.minecraft.world.phys.AABB slab = axis == 0
+                ? new net.minecraft.world.phys.AABB(lo, hb.minY + 0.02, hb.minZ, hi, hb.maxY, hb.maxZ)
+                : new net.minecraft.world.phys.AABB(hb.minX, hb.minY + 0.02, lo, hb.maxX, hb.maxY, hi);
+        double pad = ENTITY_SIDE_PAD;
+        for (net.minecraft.world.phys.shapes.VoxelShape shape : mc.level.getBlockCollisions(e, slab)) {
+            for (net.minecraft.world.phys.AABB b : shape.toAabbs()) {
+                if (!b.intersects(slab)) continue;
+                double face = axis == 0 ? (dir > 0 ? b.minX - edge : edge - b.maxX)
+                        : (dir > 0 ? b.minZ - edge : edge - b.maxZ);
+                pad = Math.min(pad, face - 0.02);
+            }
+        }
+        return Math.max(pad, -0.05); // slightly inside the hitbox when it touches the block
+    }
+
     /** The entities near the camera this frame, nearest first (FrameSlot.MAX_ENTITIES at most). */
     private void captureEntities(FrameSlot c, boolean firstPerson) {
         c.entityCount = 0;
@@ -1324,8 +1352,14 @@ public final class FrameGenerator {
             double py = net.minecraft.util.Mth.lerp(pt, e.yo, e.getY());
             double pz = net.minecraft.util.Mth.lerp(pt, e.zo, e.getZ());
             // The box around the entity's position, padded: models (and model mods such as
-            // Fresh Animations) reach past the hitbox.
-            net.minecraft.world.phys.AABB box = e.getBoundingBox().move(-e.getX(), -e.getY(), -e.getZ()).inflate(0.6, 0.35, 0.6);
+            // Fresh Animations) reach past the hitbox. Not below its feet, and on each side only up
+            // to the nearest block there: the floor it walks on and walls next to it would move with
+            // it (flicker).
+            net.minecraft.world.phys.AABB world = e.getBoundingBox();
+            net.minecraft.world.phys.AABB hit = world.move(-e.getX(), -e.getY(), -e.getZ());
+            net.minecraft.world.phys.AABB box = new net.minecraft.world.phys.AABB(
+                    hit.minX - sidePad(mc, e, world, 0, -1), hit.minY + 0.02, hit.minZ - sidePad(mc, e, world, 2, -1),
+                    hit.maxX + sidePad(mc, e, world, 0, 1), hit.maxY + 0.35, hit.maxZ + sidePad(mc, e, world, 2, 1));
             int i = c.entityCount++;
             c.entityIds[i] = e.getId();
             c.entityPos[i * 3] = px;
@@ -1445,6 +1479,7 @@ public final class FrameGenerator {
         pass.setUniform("Mask" + id, s.maskView, nearest);
         pass.setUniform("NoHand" + id, s.noHandView, linear);
         pass.setUniform("Final" + id, s.finalView, nearest);
+        pass.setUniform("Terrain" + id, s.terrainDepthView, nearest);
     }
 
     /** Depth-buffer value at distance d in front of the camera, for projection proj. */
@@ -1471,7 +1506,7 @@ public final class FrameGenerator {
         return pipelines.computeIfAbsent(key, k -> {
             BindGroupLayout.Builder layout = BindGroupLayout.builder();
             for (String id : interpolate ? new String[]{"A", "B"} : new String[]{"A"}) {
-                for (String tex : new String[]{"World", "Depth", "Mask", "NoHand", "Final"}) {
+                for (String tex : new String[]{"World", "Depth", "Mask", "NoHand", "Final", "Terrain"}) {
                     layout.withUniform(tex + id, UniformType.COMBINED_IMAGE_SAMPLER);
                 }
             }
@@ -1498,6 +1533,16 @@ public final class FrameGenerator {
         frameProjCaptured = true;
     }
 
+    /**
+     * Whether the level renderer should draw entities in a pass of their own, so the depth before
+     * them can be kept (captureTerrainDepth). Also with a shader pack (Iris draws into the main
+     * depth buffer too; IrisPipelineMixin draws them while its opaque targets are still in use).
+     * Only interpolation moves entities.
+     */
+    public boolean wantsTerrainDepth() {
+        return active() && interpolated();
+    }
+
     /** Whether the level renderer should keep the depth from before translucents (see captureOpaqueDepth). */
     public boolean wantsOpaqueDepth() {
         return active() && !Compat.irisShadersActive();
@@ -1514,6 +1559,17 @@ public final class FrameGenerator {
         FrameSlot c = prepare(gr);
         if (c == null) return;
         frameOpaqueDepthCaptured = copy(gr.mainRenderTarget().getDepthTexture(), c.depth);
+    }
+
+    /**
+     * After the opaque terrain, before entities and other solid features are drawn. Pixels whose
+     * depth differs from this in the final depth were drawn by an entity (or a block entity): only
+     * those move with an entity, not the blocks around it inside its padded box.
+     */
+    public void captureTerrainDepth(GameRenderer gr) {
+        FrameSlot c = prepare(gr);
+        if (c == null) return;
+        frameTerrainDepthCaptured = copy(gr.mainRenderTarget().getDepthTexture(), c.terrainDepth);
     }
 
     /** Right before the held item is drawn: the depth buffer still has the whole world in it. */
@@ -1574,6 +1630,7 @@ public final class FrameGenerator {
         }
         c.extractNs = frameExtractNs != 0 ? frameExtractNs : System.nanoTime();
         c.hasHand = frameHandCaptured;
+        c.hasTerrainDepth = frameTerrainDepthCaptured;
         c.level = Minecraft.getInstance().level;
         c.hasFinal = false;
         c.valid = true;
