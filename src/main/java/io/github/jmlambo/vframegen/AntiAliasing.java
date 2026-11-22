@@ -17,8 +17,10 @@ import com.mojang.renderpearl.api.textures.FilterMode;
 import com.mojang.renderpearl.api.textures.GpuTexture;
 import com.mojang.renderpearl.api.textures.GpuTextureView;
 import io.github.jmlambo.vframegen.mixin.RenderSystemAccessor;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.resources.Identifier;
+import org.joml.Vector4f;
 import org.lwjgl.system.MemoryStack;
 
 import java.nio.ByteBuffer;
@@ -28,9 +30,12 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * FXAA on the world image, after the world (and the render scale upscaler) and before the GUI:
+ * FXAA or SMAA on the world image, after the world (and the render scale upscaler) and before the GUI:
  * the HUD stays sharp, and generated frames are built from the smoothed image. Works with or
  * without frame generation.
+ *
+ * <p>SMAA is the reference implementation (shaders/include/smaa.glsl, MIT) in its three passes:
+ * edges, blending weights (with its precomputed area and search textures), neighbourhood blend.
  */
 public final class AntiAliasing {
     private static final int UBO_SIZE = 16;
@@ -39,7 +44,11 @@ public final class AntiAliasing {
     private static GpuBuffer ubo;
     private static int w = -1, h = -1;
     private static GpuFormat format;
-    private static final Map<GpuFormat, RenderPipeline> pipelines = new HashMap<>();
+    private static final Map<String, RenderPipeline> pipelines = new HashMap<>();
+    private static final Identifier AREA = Identifier.fromNamespaceAndPath(VFrameGen.MOD_ID, "textures/smaa/area.png");
+    private static final Identifier SEARCH = Identifier.fromNamespaceAndPath(VFrameGen.MOD_ID, "textures/smaa/search.png");
+    private static GpuTexture edgesTex, weightsTex;
+    private static GpuTextureView edgesView, weightsView;
     private static boolean broken;
 
     private AntiAliasing() {
@@ -47,7 +56,8 @@ public final class AntiAliasing {
 
     /** After the world: smooth the main color target in place. */
     public static void apply(GameRenderer gr) {
-        if (broken || !VFrameGen.config().antiAliasing) return;
+        FrameGenConfig.AntiAliasingMode mode = VFrameGen.config().antiAliasing;
+        if (broken || mode == FrameGenConfig.AntiAliasingMode.OFF) return;
         // Until the first resource reload is done, mod shaders can't load.
         if (RenderSystemAccessor.vframegen$getCurrentPipelineCache() == null) return;
         RenderTarget main = gr.mainRenderTarget();
@@ -55,17 +65,51 @@ public final class AntiAliasing {
         GpuTextureView colorView = main.getColorTextureView();
         if (color == null || colorView == null) return;
         try {
-            ensure(color.getWidth(0), color.getHeight(0), color.getFormat());
+            boolean smaa = mode == FrameGenConfig.AntiAliasingMode.SMAA;
+            // Fetched before any pass is open: the first fetch uploads the texture.
+            GpuTextureView area = null, search = null;
+            if (smaa) {
+                area = Minecraft.getInstance().getTextureManager().getTexture(AREA).getTextureView();
+                search = Minecraft.getInstance().getTextureManager().getTexture(SEARCH).getTextureView();
+            }
+            ensure(color.getWidth(0), color.getHeight(0), color.getFormat(), smaa);
             CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
             try (MemoryStack stack = MemoryStack.stackPush()) {
-                ByteBuffer data = Std140Builder.onStack(stack, UBO_SIZE).putVec4(1f / w, 1f / h, 0f, 0f).get();
+                ByteBuffer data = Std140Builder.onStack(stack, UBO_SIZE).putVec4(1f / w, 1f / h, w, h).get();
                 encoder.writeToBuffer(ubo.slice(), data);
             }
-            try (RenderPass pass = encoder.createRenderPass(() -> "VFrameGen FXAA", tempView, Optional.empty())) {
-                pass.setPipeline(RenderSystem.getCompiledPipeline(pipeline(format)));
-                pass.setUniform("Source", colorView, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
-                pass.setUniform("Fxaa", ubo);
-                pass.draw(3, 1, 0, 0);
+            var linear = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);
+            if (smaa) {
+                var nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
+                try (RenderPass pass = encoder.createRenderPass(() -> "VFrameGen SMAA edges", edgesView,
+                        Optional.of(new Vector4f(0f)))) {
+                    pass.setPipeline(RenderSystem.getCompiledPipeline(pipeline("smaa_edges", GpuFormat.RGBA8_UNORM)));
+                    pass.setUniform("Source", colorView, nearest);
+                    pass.setUniform("Smaa", ubo);
+                    pass.draw(3, 1, 0, 0);
+                }
+                try (RenderPass pass = encoder.createRenderPass(() -> "VFrameGen SMAA weights", weightsView, Optional.empty())) {
+                    pass.setPipeline(RenderSystem.getCompiledPipeline(pipeline("smaa_weights", GpuFormat.RGBA8_UNORM)));
+                    pass.setUniform("Edges", edgesView, linear);
+                    pass.setUniform("Area", area, linear);
+                    pass.setUniform("Search", search, linear);
+                    pass.setUniform("Smaa", ubo);
+                    pass.draw(3, 1, 0, 0);
+                }
+                try (RenderPass pass = encoder.createRenderPass(() -> "VFrameGen SMAA blend", tempView, Optional.empty())) {
+                    pass.setPipeline(RenderSystem.getCompiledPipeline(pipeline("smaa_blend", format)));
+                    pass.setUniform("Source", colorView, linear);
+                    pass.setUniform("Weights", weightsView, linear);
+                    pass.setUniform("Smaa", ubo);
+                    pass.draw(3, 1, 0, 0);
+                }
+            } else {
+                try (RenderPass pass = encoder.createRenderPass(() -> "VFrameGen FXAA", tempView, Optional.empty())) {
+                    pass.setPipeline(RenderSystem.getCompiledPipeline(pipeline("fxaa", format)));
+                    pass.setUniform("Source", colorView, linear);
+                    pass.setUniform("Fxaa", ubo);
+                    pass.draw(3, 1, 0, 0);
+                }
             }
             encoder.copyTextureToTexture(tempTex, color, 0, 0, 0, 0, 0, w, h);
         } catch (RuntimeException e) {
@@ -74,33 +118,68 @@ public final class AntiAliasing {
         }
     }
 
-    private static void ensure(int width, int height, GpuFormat color) {
-        if (width == w && height == h && color == format && tempTex != null) return;
+    private static void ensure(int width, int height, GpuFormat color, boolean smaa) {
+        if (width == w && height == h && color == format && tempTex != null) {
+            if (smaa && edgesTex == null) createSmaaTargets();
+            return;
+        }
+        closeSmaaTargets();
         if (tempView != null) tempView.close();
         if (tempTex != null) tempTex.close();
         GpuDevice device = RenderSystem.getDevice();
-        tempTex = device.createTexture("VFrameGen FXAA", GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_COPY_SRC
+        tempTex = device.createTexture("VFrameGen anti-aliasing", GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_COPY_SRC
                 | GpuTexture.USAGE_TEXTURE_BINDING, color, width, height, 1, 1);
         tempView = device.createTextureView(tempTex);
         if (ubo == null) {
-            ubo = device.createBuffer(() -> "VFrameGen FXAA uniforms", GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, UBO_SIZE);
+            ubo = device.createBuffer(() -> "VFrameGen anti-aliasing uniforms", GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, UBO_SIZE);
         }
         w = width;
         h = height;
         format = color;
+        if (smaa) createSmaaTargets();
     }
 
-    private static RenderPipeline pipeline(GpuFormat color) {
-        return pipelines.computeIfAbsent(color, f -> RenderPipeline.builder()
-                .withLocation(Identifier.fromNamespaceAndPath(VFrameGen.MOD_ID, "pipeline/fxaa_" + f.name().toLowerCase(Locale.ROOT)))
-                .withVertexShader("core/screenquad")
-                .withFragmentShader(Identifier.fromNamespaceAndPath(VFrameGen.MOD_ID, "core/fxaa"))
-                .withBindGroupLayout(BindGroupLayout.builder()
-                        .withUniform("Source", UniformType.COMBINED_IMAGE_SAMPLER)
-                        .withUniform("Fxaa", UniformType.UNIFORM_BUFFER)
-                        .build())
-                .withColorTargetState(new ColorTargetState(Optional.empty(), f, ColorTargetState.WRITE_ALL))
-                .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
-                .build());
+    private static void createSmaaTargets() {
+        GpuDevice device = RenderSystem.getDevice();
+        int usage = GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING;
+        edgesTex = device.createTexture("VFrameGen SMAA edges", usage, GpuFormat.RGBA8_UNORM, w, h, 1, 1);
+        edgesView = device.createTextureView(edgesTex);
+        weightsTex = device.createTexture("VFrameGen SMAA weights", usage, GpuFormat.RGBA8_UNORM, w, h, 1, 1);
+        weightsView = device.createTextureView(weightsTex);
+    }
+
+    private static void closeSmaaTargets() {
+        if (edgesView != null) edgesView.close();
+        if (edgesTex != null) edgesTex.close();
+        if (weightsView != null) weightsView.close();
+        if (weightsTex != null) weightsTex.close();
+        edgesTex = weightsTex = null;
+        edgesView = weightsView = null;
+    }
+
+    private static RenderPipeline pipeline(String shader, GpuFormat target) {
+        return pipelines.computeIfAbsent(shader + "_" + target.name().toLowerCase(Locale.ROOT), key -> {
+            BindGroupLayout.Builder layout = BindGroupLayout.builder();
+            switch (shader) {
+                case "fxaa" -> layout.withUniform("Source", UniformType.COMBINED_IMAGE_SAMPLER).withUniform("Fxaa", UniformType.UNIFORM_BUFFER);
+                case "smaa_edges" -> layout.withUniform("Source", UniformType.COMBINED_IMAGE_SAMPLER).withUniform("Smaa", UniformType.UNIFORM_BUFFER);
+                case "smaa_weights" -> layout.withUniform("Edges", UniformType.COMBINED_IMAGE_SAMPLER)
+                        .withUniform("Area", UniformType.COMBINED_IMAGE_SAMPLER)
+                        .withUniform("Search", UniformType.COMBINED_IMAGE_SAMPLER)
+                        .withUniform("Smaa", UniformType.UNIFORM_BUFFER);
+                case "smaa_blend" -> layout.withUniform("Source", UniformType.COMBINED_IMAGE_SAMPLER)
+                        .withUniform("Weights", UniformType.COMBINED_IMAGE_SAMPLER)
+                        .withUniform("Smaa", UniformType.UNIFORM_BUFFER);
+                default -> throw new IllegalArgumentException(shader);
+            }
+            return RenderPipeline.builder()
+                    .withLocation(Identifier.fromNamespaceAndPath(VFrameGen.MOD_ID, "pipeline/" + key))
+                    .withVertexShader("core/screenquad")
+                    .withFragmentShader(Identifier.fromNamespaceAndPath(VFrameGen.MOD_ID, "core/" + shader))
+                    .withBindGroupLayout(layout.build())
+                    .withColorTargetState(new ColorTargetState(Optional.empty(), target, ColorTargetState.WRITE_ALL))
+                    .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
+                    .build();
+        });
     }
 }

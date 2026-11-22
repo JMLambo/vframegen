@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Anti-aliasing (Quality, off by default): FXAA on the world, before the GUI, so the HUD stays sharp
+- Anti-aliasing (Quality, off by default): FXAA or SMAA (the reference SMAA by Jorge Jimenez et al., MIT) on the world, before the GUI, so the HUD stays sharp
   and generated frames are built from the smoothed image. Works with or without frame generation.
 ## 0.1.0-alpha.8
 

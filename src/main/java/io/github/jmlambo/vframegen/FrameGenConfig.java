@@ -15,6 +15,7 @@ public final class FrameGenConfig {
     public enum DepthMode { AUTO, DEPTH, ROTATION_ONLY }
     public enum Pacing { OFF, BALANCED }
     public enum Upscaler { BICUBIC, EDGE_ADAPTIVE }
+    public enum AntiAliasingMode { OFF, FXAA, SMAA }
 
     public static final int MAX_MULTIPLIER = 6;
     /** Vanilla's frame limiter only applies limits below 260 (260 means unlimited). */
@@ -38,7 +39,7 @@ public final class FrameGenConfig {
     public int maxRealFrameAgeMs = 100;
     public float guiDiffThreshold = 0.004f;
     public float sharpness = 0.0f;
-    public boolean antiAliasing = false;
+    public AntiAliasingMode antiAliasing = AntiAliasingMode.OFF;
     public boolean motionBlur = false;
     public float motionBlurStrength = 0.5f;
     public double renderScale = 1.0;
@@ -80,7 +81,8 @@ public final class FrameGenConfig {
             maxRealFrameAgeMs       below this real frame rate (in ms per frame) generation pauses.
             guiDiffThreshold        how different a pixel must be after the GUI pass to count as GUI.
             sharpness               unsharp mask applied to generated frames, 0 = off.
-            antiAliasing            FXAA on the world, before the GUI (most shader packs have their own).
+            antiAliasing            OFF, FXAA or SMAA on the world, before the GUI (most shader packs have their own).
+                                    FXAA is the cheapest; SMAA keeps edges and textures sharper.
             motionBlur              camera motion blur on every frame shown, along that frame's own motion
                                     (turn the shader pack's motion blur off: it ghosts with frame generation).
             motionBlurStrength      0.1 to 1.0: blur length as a fraction of the time between shown frames.
@@ -133,7 +135,10 @@ public final class FrameGenConfig {
                 c.maxRealFrameAgeMs = (int) dbl(props, "maxRealFrameAgeMs", c.maxRealFrameAgeMs);
                 c.guiDiffThreshold = (float) dbl(props, "guiDiffThreshold", c.guiDiffThreshold);
                 c.sharpness = (float) dbl(props, "sharpness", c.sharpness);
-                c.antiAliasing = bool(props, "antiAliasing", c.antiAliasing);
+                // Older versions stored true/false (true was FXAA).
+                String aa = props.getProperty("antiAliasing", "").trim();
+                c.antiAliasing = aa.equalsIgnoreCase("true") ? AntiAliasingMode.FXAA : aa.equalsIgnoreCase("false")
+                        ? AntiAliasingMode.OFF : enumOf(props, "antiAliasing", c.antiAliasing, AntiAliasingMode.class);
                 c.motionBlur = bool(props, "motionBlur", c.motionBlur);
                 c.motionBlurStrength = (float) Math.clamp(dbl(props, "motionBlurStrength", c.motionBlurStrength), 0.1, 1.0);
                 c.debugTint = bool(props, "debugTint", c.debugTint);
@@ -173,7 +178,7 @@ public final class FrameGenConfig {
         values.put("maxRealFrameAgeMs", Integer.toString(maxRealFrameAgeMs));
         values.put("guiDiffThreshold", Float.toString(guiDiffThreshold));
         values.put("sharpness", Float.toString(sharpness));
-        values.put("antiAliasing", Boolean.toString(antiAliasing));
+        values.put("antiAliasing", antiAliasing.name());
         values.put("motionBlur", Boolean.toString(motionBlur));
         values.put("motionBlurStrength", Float.toString(motionBlurStrength));
         values.put("debugTint", Boolean.toString(debugTint));

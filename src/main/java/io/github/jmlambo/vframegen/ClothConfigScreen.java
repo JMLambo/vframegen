@@ -110,8 +110,9 @@ final class ClothConfigScreen {
         quality.addEntry(e.startFloatField(t("sharpness"), cfg.sharpness)
                 .setDefaultValue(def.sharpness).setMin(0).setMax(2).setTooltip(tip("sharpness"))
                 .setSaveConsumer(v -> cfg.sharpness = v).build());
-        quality.addEntry(e.startBooleanToggle(t("antiAliasing"), cfg.antiAliasing)
+        quality.addEntry(e.startEnumSelector(t("antiAliasing"), FrameGenConfig.AntiAliasingMode.class, cfg.antiAliasing)
                 .setDefaultValue(def.antiAliasing).setTooltip(tip("antiAliasing"))
+                .setEnumNameProvider(v -> Component.translatable("vframegen.config.antiAliasing." + v.name().toLowerCase(java.util.Locale.ROOT)))
                 .setSaveConsumer(v -> cfg.antiAliasing = v).build());
         var motionBlur = e.startBooleanToggle(t("motionBlur"), cfg.motionBlur)
                 .setDefaultValue(def.motionBlur).setTooltip(tip("motionBlur"))
