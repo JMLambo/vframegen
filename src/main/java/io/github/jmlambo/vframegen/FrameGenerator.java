@@ -133,6 +133,14 @@ public final class FrameGenerator {
     // Smoothed GPU time of one generated frame (0: not measured yet), for adaptive mode's budget.
     private double gpuPassAvgNs;
     private int gpuPassStale; // timers still pending from before the last invalidate()
+    // Smoothed render-thread time to hand one generated frame over (blit, submit, present). Small
+    // while the GPU keeps up; when it is overloaded the hand-over waits for it, so this grows: the
+    // copies, presents and other programs' GPU work (a screen recorder) the pass timer can't see.
+    private double genWallAvgNs;
+
+    private void noteGenWall(long ns) {
+        genWallAvgNs = genWallAvgNs <= 0 ? ns : genWallAvgNs + (ns - genWallAvgNs) * 0.05;
+    }
     private final Map<String, RenderPipeline> pipelines = new HashMap<>();
     private boolean broken;
 
@@ -282,6 +290,7 @@ public final class FrameGenerator {
         minSlackMs = Double.MAX_VALUE;
         // A settings change can change what a generated frame costs: measure it again.
         gpuPassAvgNs = 0;
+        genWallAvgNs = 0;
         gpuPassStale = gpuTimers.size();
     }
 
@@ -909,8 +918,10 @@ public final class FrameGenerator {
 
     /** The most frames per real frame whose generated frames fit in that GPU budget. */
     private double gpuBudgetCeiling() {
-        if (gpuPassAvgNs <= 0 || adaptiveIntervalNs <= 0) return FrameGenConfig.ADAPTIVE_MAX_MULTIPLIER;
-        return Math.clamp(1.0 + GPU_BUDGET_SHARE * adaptiveIntervalNs / gpuPassAvgNs, 1.0, FrameGenConfig.ADAPTIVE_MAX_MULTIPLIER);
+        // What one generated frame costs: its pass on the GPU, plus any wait to hand it over.
+        double cost = Math.max(0, gpuPassAvgNs) + Math.max(0, genWallAvgNs);
+        if (cost <= 0 || adaptiveIntervalNs <= 0) return FrameGenConfig.ADAPTIVE_MAX_MULTIPLIER;
+        return Math.clamp(1.0 + GPU_BUDGET_SHARE * adaptiveIntervalNs / cost, 1.0, FrameGenConfig.ADAPTIVE_MAX_MULTIPLIER);
     }
 
     private double adaptiveCeiling() {
@@ -1208,6 +1219,7 @@ public final class FrameGenerator {
         long t2 = System.nanoTime();
         costSubmitNs += t1 - t0;
         costPresentNs += t2 - t1;
+        noteGenWall(t2 - t0);
         notePresent();
         screenEvent(System.nanoTime() + (gpuPassCount == 0 ? 1_000_000L : gpuPassNs / gpuPassCount), false);
         statsGenerated++;
@@ -1941,6 +1953,7 @@ public final class FrameGenerator {
         long t1 = System.nanoTime();
         costSubmitNs += t1 - t0;
         genCostNs += t1 - t0;
+        noteGenWall(t1 - t0);
         notePresent();
         screenEvent(System.nanoTime() + (gpuPassCount == 0 ? 1_000_000L : gpuPassNs / gpuPassCount), false);
         statsGenerated++;
