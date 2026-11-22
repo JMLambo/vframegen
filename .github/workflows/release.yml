@@ -51,11 +51,14 @@ jobs:
       - name: Build
         run: ./gradlew build --stacktrace
 
+      # Every jar that gets published, also one a manual run rebuilt from an older tag. The script
+      # comes from the commit this workflow runs from: an older tag may not have it.
       - name: Scan with VirusTotal
-        if: github.event_name == 'push'
         env:
           VT_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
-        run: .github/scripts/virustotal.sh "$(ls build/libs/*.jar | grep -v -- '-sources\.jar$' | head -n1)"
+        run: |
+          git show "${GITHUB_SHA}:.github/scripts/virustotal.sh" > "${RUNNER_TEMP}/virustotal.sh"
+          bash "${RUNNER_TEMP}/virustotal.sh" "$(ls build/libs/*.jar | grep -v -- '-sources\.jar$' | head -n1)"
 
       - name: Publish the GitHub Release
         if: github.event_name == 'push'

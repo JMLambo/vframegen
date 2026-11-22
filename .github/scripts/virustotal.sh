@@ -22,11 +22,20 @@ if [ -z "${id}" ]; then
   exit 1
 fi
 sha=$(sha256sum "${jar}" | cut -d' ' -f1)
-# The free API allows 4 requests a minute: poll every 20 seconds, up to 10 minutes.
+# The free API allows 4 requests a minute per key. Poll every 30 seconds (2 a minute), so a pull
+# request scan and a release scan running at the same time still fit; a refused poll is retried at
+# the next one. Up to 15 minutes.
+status=""
+analysis="{}"
 for i in $(seq 30); do
-  sleep 20
-  analysis=$(curl -sfS -H "x-apikey: ${VT_KEY}" "${api}/analyses/${id}" || true)
-  [ "$(echo "${analysis}" | jq -r '.data.attributes.status // empty')" = completed ] && break
+  sleep 30
+  reply=$(curl -sfS -H "x-apikey: ${VT_KEY}" "${api}/analyses/${id}" || true)
+  [ -n "${reply}" ] || continue
+  analysis="${reply}"
+  status=$(echo "${analysis}" | jq -r '.data.attributes.status // empty')
+  # Partial results already over the threshold are enough to stop.
+  [ "${status}" = completed ] && break
+  [ "$(echo "${analysis}" | jq -r '.data.attributes.stats.malicious // 0')" -ge 2 ] && break
 done
 stats=$(echo "${analysis}" | jq -c '.data.attributes.stats // {}')
 malicious=$(echo "${stats}" | jq -r '.malicious // 0')
@@ -36,11 +45,12 @@ link="https://www.virustotal.com/gui/file/${sha}"
   echo "### VirusTotal: $(basename "${jar}")"
   echo "Malicious: ${malicious}, suspicious: ${suspicious} ([report](${link}))"
 } >> "${GITHUB_STEP_SUMMARY}"
-if [ "$(echo "${analysis}" | jq -r '.data.attributes.status // empty')" != completed ]; then
-  echo "::warning::VirusTotal analysis did not finish in time: ${link}"
-elif [ "${malicious}" -ge 2 ]; then
+# The threshold first: partial results of an unfinished analysis count too.
+if [ "${malicious}" -ge 2 ]; then
   echo "::error::${malicious} VirusTotal engines flag the jar as malicious: ${link}"
   exit 1
+elif [ "${status}" != completed ]; then
+  echo "::warning::VirusTotal analysis did not finish in time (${malicious} malicious so far): ${link}"
 elif [ "${malicious}" -ge 1 ] || [ "${suspicious}" -ge 1 ]; then
   echo "::warning::VirusTotal: ${malicious} malicious, ${suspicious} suspicious (likely false positives): ${link}"
 else

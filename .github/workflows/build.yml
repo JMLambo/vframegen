@@ -45,6 +45,10 @@ jobs:
     if: github.event_name == 'pull_request'
     needs: build
     runs-on: ubuntu-latest
+    # One pull request scan at a time: they share the API key's 4 requests a minute.
+    concurrency:
+      group: virustotal
+      cancel-in-progress: false
     steps:
       - name: Check out
         uses: actions/checkout@v7
