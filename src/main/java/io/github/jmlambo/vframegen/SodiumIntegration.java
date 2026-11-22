@@ -41,7 +41,7 @@ public final class SodiumIntegration implements ConfigEntryPoint {
                         .setImpact(OptionImpact.MEDIUM))
                 .addOption(bool(b, storage, "adaptive", def.adaptive, v -> cfg.adaptive = v, () -> cfg.adaptive))
                 .addOption(b.createIntegerOption(id("multiplier"))
-                        .setName(t("multiplier")).setTooltip(tip("multiplier"))
+                        .setName(Component.translatable("vframegen.sodium.multiplier")).setTooltip(tip("multiplier"))
                         .setRange(2, FrameGenConfig.MAX_MULTIPLIER, 1)
                         .setValueFormatter(v -> Component.literal(v + "x"))
                         .setDefaultValue(def.multiplier).setStorageHandler(storage)
@@ -107,7 +107,7 @@ public final class SodiumIntegration implements ConfigEntryPoint {
                         .setBinding(v -> cfg.motionBlurStrength = v / 100f, () -> Math.round(cfg.motionBlurStrength * 100)));
 
         var page = b.createOptionPage()
-                .setName(Component.translatable("vframegen.config.title"))
+                .setName(Component.translatable("vframegen.sodium.page"))
                 .addOptionGroup(general)
                 .addOptionGroup(upscaling)
                 .addOptionGroup(quality);
@@ -121,6 +121,7 @@ public final class SodiumIntegration implements ConfigEntryPoint {
 
         b.registerOwnModOptions()
                 .setName("VFrameGen")
+                .setNonTintedIcon(Identifier.fromNamespaceAndPath(VFrameGen.MOD_ID, "icon.png"))
                 .addPage(page);
     }
 

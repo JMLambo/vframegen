@@ -4,6 +4,8 @@
   "vframegen.toggle.on": "Frame generation ON (%s)",
   "vframegen.toggle.off": "Frame generation OFF",
   "vframegen.config.title": "VFrameGen",
+  "vframegen.sodium.page": "Settings",
+  "vframegen.sodium.multiplier": "Multiplier",
   "vframegen.sodium.allSettings": "All VFrameGen settings",
   "vframegen.sodium.allSettings.tooltip": "Opens the full settings screen: limits, reprojection, frame pacing and debug options.",
   "vframegen.config.general": "General",
