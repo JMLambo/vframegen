@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Moving entities in generated frames: mobs, players, boats and minecarts now move with their own
+  motion between real frames instead of only the camera's (they used to jump to the next real frame's
+  position, a stutter). Root motion of the 32 nearest entities, from their bounding boxes, so it works
+  the same with model mods (EMF/ETF, Fresh Animations).
 - Temporal upscaling (Upscaler: Temporal): the world renders with a sub-pixel jitter that changes
   every frame, and a full-resolution history accumulates the samples (reprojected with depth, clipped
   to the current frame's colours so changes don't ghost). Cleaner edges than the spatial upscalers,

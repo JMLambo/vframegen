@@ -23,6 +23,12 @@ final class FrameSlot {
     boolean hasHand;
     boolean firstPerson;
     final Vector3d pos = new Vector3d();
+    // Entities seen in this frame (nearest first): id, position (world), box around that position.
+    static final int MAX_ENTITIES = 32;
+    int entityCount;
+    final int[] entityIds = new int[MAX_ENTITIES];
+    final double[] entityPos = new double[MAX_ENTITIES * 3];
+    final float[] entityBox = new float[MAX_ENTITIES * 6];
     final Matrix4f viewRot = new Matrix4f();
     final Matrix4f proj = new Matrix4f();
     // Debug: both candidates for proj, with and without vanilla's view bobbing.

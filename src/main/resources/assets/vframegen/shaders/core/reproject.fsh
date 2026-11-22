@@ -42,6 +42,11 @@ layout(std140) uniform FrameGen {
     vec4 AFlags;   // x: hand buffer valid, y: near-depth hand lock, z: its depth threshold, w: use depth
     vec4 BFlags;
     vec4 Mix;      // x: position between A (0) and B (1)
+    vec4 EntCount; // x: entities in A, y: in B
+    // Per source, 32 x (box min (w: screen motion x), box max (w: y), motion to the output frame,
+    // screen rectangle in the output), relative to its camera.
+    vec4 EntA[128];
+    vec4 EntB[128];
 };
 
 layout(location = 0) in vec2 texCoord;
@@ -55,6 +60,7 @@ struct Warp {
     int reason;
     bool hit;      // a real match for this pixel (not a fill, not off screen)
     vec3 still;    // this source's world at the output pixel, not warped
+    bool entity;   // the match is on a moving entity
 };
 
 bool isSky(float d) {
@@ -79,13 +85,29 @@ vec3 projectDirection(vec2 uvDst, mat4 srcViewProjRot) {
     return vec3((clip.xy / clip.w) * 0.5 + 0.5, 1.0);
 }
 
+// A point (relative to the source camera) inside a moving entity's box moves with it as well.
+// Root motion only, so it is the same for any model or animation mod.
+vec3 entityMotion(vec3 p, bool fromB) {
+    int n = int(fromB ? EntCount.y : EntCount.x);
+    for (int i = 0; i < n; i++) {
+        vec3 lo = fromB ? EntB[i * 4].xyz : EntA[i * 4].xyz;
+        vec3 hi = fromB ? EntB[i * 4 + 1].xyz : EntA[i * 4 + 1].xyz;
+        if (all(greaterThanEqual(p, lo)) && all(lessThanEqual(p, hi))) {
+            return fromB ? EntB[i * 4 + 2].xyz : EntA[i * 4 + 2].xyz;
+        }
+    }
+    return vec3(0.0);
+}
+
 // Where a source pixel lands in the output. z is 0 when it lands behind the output camera (or the
 // depth unprojects to nothing): never a match.
-vec3 landingSpot(vec2 uvSrc, float depth, mat4 invViewProj, mat4 dstViewProj) {
+vec3 landingSpot(vec2 uvSrc, float depth, mat4 invViewProj, mat4 dstViewProj, bool fromB) {
     float ndcZ = Params2.y > 0.5 ? depth : depth * 2.0 - 1.0;
     vec4 p = invViewProj * vec4(uvSrc * 2.0 - 1.0, ndcZ, 1.0);
     if (abs(p.w) < 1.0e-12) return vec3(-1.0, -1.0, 0.0);
-    vec4 clip = dstViewProj * vec4(p.xyz / p.w, 1.0);
+    vec3 pos = p.xyz / p.w;
+    pos += entityMotion(pos, fromB);
+    vec4 clip = dstViewProj * vec4(pos, 1.0);
     if (clip.w <= 1.0e-6) return vec3(-1.0, -1.0, 0.0);
     return vec3((clip.xy / clip.w) * 0.5 + 0.5, 1.0);
 }
@@ -122,10 +144,11 @@ vec3 sceneColor(sampler2D world, sampler2D noHand, sampler2D mask, vec2 uv, vec4
 }
 
 Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampler2D noHand, sampler2D finalTex,
-          mat4 invViewProj, mat4 dstViewProj, mat4 viewProjRot, vec4 flags) {
+          mat4 invViewProj, mat4 dstViewProj, mat4 viewProjRot, vec4 flags, bool fromB) {
     Warp w;
     w.near = -1.0;
     w.hit = true;
+    w.entity = false;
 
     // GUI / HUD: wherever the GUI changed the image, this source shows the GUI as it was.
     vec3 finalPx = texture(finalTex, uvDst).rgb;
@@ -165,13 +188,25 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
         vec2 bestMiss = skyBehind ? uvDst : skyUv;
         float bestMissNear = 0.0;
         bool haveMiss = false;
-        for (int chain = skyBehind ? 1 : 0; chain < 2; chain++) {
-            vec2 uv = chain == 0 ? skyUv : uvDst;
+        // Extra starting points: where a moving entity whose output rectangle covers this pixel
+        // came from. Without them, an entity that moved farther than its own width is never found
+        // (both other searches start on the background it left).
+        vec2 seeds[4];
+        int seedCount = 0;
+        int ents = int(fromB ? EntCount.y : EntCount.x);
+        for (int e = 0; e < ents && seedCount < 4; e++) {
+            vec4 rect = fromB ? EntB[e * 4 + 3] : EntA[e * 4 + 3];
+            if (uvDst.x < rect.x || uvDst.y < rect.y || uvDst.x > rect.z || uvDst.y > rect.w) continue;
+            vec2 motion = vec2(fromB ? EntB[e * 4].w : EntA[e * 4].w, fromB ? EntB[e * 4 + 1].w : EntA[e * 4 + 1].w);
+            seeds[seedCount++] = uvDst - motion;
+        }
+        for (int chain = skyBehind ? 1 : 0; chain < 2 + seedCount; chain++) {
+            vec2 uv = chain == 0 ? skyUv : chain == 1 ? uvDst : seeds[chain - 2];
             for (int i = 0; i < 6; i++) {
                 vec2 uvc = clamp(uv, 0.0, 1.0);
                 float d = texture(depthTex, uvc).r;
                 bool sky = isSky(d);
-                vec3 spot = sky ? vec3(uvDst + (uvc - skyUv), 1.0) : landingSpot(uvc, d, invViewProj, dstViewProj);
+                vec3 spot = sky ? vec3(uvDst + (uvc - skyUv), 1.0) : landingSpot(uvc, d, invViewProj, dstViewProj, fromB);
                 if (spot.z < 0.5) break; // behind the output camera: this chain can't go on
                 vec2 landed = spot.xy;
                 float errPx = length((landed - uvDst) * screen);
@@ -197,6 +232,14 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
             }
         }
         uvSrc = haveHit ? bestHit : bestMiss;
+        if (haveHit) {
+            float d = texture(depthTex, clamp(uvSrc, 0.0, 1.0)).r;
+            if (!isSky(d)) {
+                float ndcZ = Params2.y > 0.5 ? d : d * 2.0 - 1.0;
+                vec4 p = invViewProj * vec4(uvSrc * 2.0 - 1.0, ndcZ, 1.0);
+                w.entity = abs(p.w) > 1.0e-12 && any(notEqual(entityMotion(p.xyz / p.w, fromB), vec3(0.0)));
+            }
+        }
         w.near = haveHit ? bestHitNear : bestMissNear;
         contested = !haveHit || maxHitNear - minHitNear > 1.0e-4;
         w.hit = haveHit;
@@ -254,12 +297,12 @@ vec3 debugColor(vec3 color, int reason) {
 
 void main() {
     vec2 uvDst = texCoord;
-    Warp a = warp(uvDst, WorldA, DepthA, MaskA, NoHandA, FinalA, AInvViewProj, ADstViewProj, AViewProjRot, AFlags);
+    Warp a = warp(uvDst, WorldA, DepthA, MaskA, NoHandA, FinalA, AInvViewProj, ADstViewProj, AViewProjRot, AFlags, false);
     vec3 color = a.color;
     int reason = a.reason;
 
 #ifdef INTERPOLATE
-    Warp b = warp(uvDst, WorldB, DepthB, MaskB, NoHandB, FinalB, BInvViewProj, BDstViewProj, BViewProjRot, BFlags);
+    Warp b = warp(uvDst, WorldB, DepthB, MaskB, NoHandB, FinalB, BInvViewProj, BDstViewProj, BViewProjRot, BFlags, true);
     float t = Mix.x;
     bool aFixed = a.reason == R_GUI || a.reason == R_HAND || a.reason == R_LOCKED;
     bool bFixed = b.reason == R_GUI || b.reason == R_HAND || b.reason == R_LOCKED;
@@ -290,7 +333,9 @@ void main() {
         if (p.hit) {
             color = p.color;
             reason = p.reason;
-        } else if (o.hit) {
+        } else if (o.hit && !o.entity) {
+            // (Not a moving entity from the other frame: its limbs are in another pose there, and
+            // filling from it showed both sets of legs.)
             color = o.color;
             reason = o.reason;
         } else {
