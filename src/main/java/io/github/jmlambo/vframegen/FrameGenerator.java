@@ -406,9 +406,11 @@ public final class FrameGenerator {
                 capAdjust -= 2;
                 roomySeconds = 0;
             }
+            fitCount = missCount = 0;
+            minSlackMs = Double.MAX_VALUE;
         }
-        fitCount = missCount = 0;
-        minSlackMs = Double.MAX_VALUE;
+        // Fewer than ten generated frames this second (adaptive's GPU budget can allow only a few
+        // on a slow GPU): keep counting into the next second, so the cap can still come back up.
     }
 
     /**
