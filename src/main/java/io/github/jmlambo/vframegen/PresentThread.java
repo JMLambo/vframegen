@@ -217,6 +217,28 @@ public final class PresentThread {
         }
     }
 
+    /**
+     * Render thread, before the pending buffers are remade: drop every generated frame still waiting
+     * in one (never shown), and wait until the one being shown, if any, is done.
+     */
+    public static void dropPending() {
+        synchronized (signal) {
+            jobs.removeIf(job -> {
+                if (job.pendingSlot < 0) return false;
+                PresentQueue.release(job.pendingSlot);
+                return true;
+            });
+            while (busy && busyPending) {
+                try {
+                    signal.wait(5);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+        }
+    }
+
     /** Present everything still queued, now (before the swapchain is recreated or destroyed). */
     public static void drain() {
         if (thread == null) return;
@@ -294,6 +316,8 @@ public final class PresentThread {
 
     private static int lastOf = 2;
     private static volatile int droppedPending;
+    // The game's queue, from its own presents (real frames).
+    private static VkQueue gameQueue;
 
     private static void handle(Job job) {
         if (job.kind == Kind.GENERATED) lastOf = Math.max(2, job.of);
@@ -317,7 +341,7 @@ public final class PresentThread {
                 PresentQueue.release(job.pendingSlot);
                 return;
             }
-            int result = PresentQueue.show(job.pendingSlot, job.drawnValue);
+            int result = PresentQueue.show(job.pendingSlot, job.drawnValue, gameQueue);
             if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
                 surfaceLost = true;
             } else if (result != VK_SUCCESS) {
@@ -325,6 +349,7 @@ public final class PresentThread {
                 return;
             }
         } else {
+            if (job.queue != null) gameQueue = job.queue;
             present(job);
         }
         long now = System.nanoTime();

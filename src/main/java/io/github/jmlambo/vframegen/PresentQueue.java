@@ -71,6 +71,7 @@ public final class PresentQueue {
     private static long timelineValue;     // render thread only
 
     private static final long[] slotImage = new long[SLOTS];
+    private static int slotWidth, slotHeight; // size of the pending buffers
     private static final VkCommandBuffer[] slotCommands = new VkCommandBuffer[SLOTS];
     private static final long[] slotFence = new long[SLOTS];
     private static final long[] slotAcquire = new long[SLOTS];
@@ -143,13 +144,17 @@ public final class PresentQueue {
     /** Whether generated frames can wait in pending buffers (a queue, a swapchain, buffers). */
     public static synchronized boolean ready() {
         if (queue == null || swapchain == 0 || images.length == 0) return false;
+        // The buffers are remade for a new window size a little after the swapchain is.
+        if (slotWidth != swapchainWidth || slotHeight != swapchainHeight) return false;
         for (long image : slotImage) if (image == 0) return false;
         return true;
     }
 
-    /** FrameGenerator: the pending buffers (their VkImage handles), or null when they are released. */
-    public static synchronized void setSlotImages(long[] vkImages) {
+    /** FrameGenerator: the pending buffers (their VkImage handles, all w x h), or null when released. */
+    public static synchronized void setSlotImages(long[] vkImages, int w, int h) {
         waitIdle();
+        slotWidth = w;
+        slotHeight = h;
         for (int i = 0; i < SLOTS; i++) {
             slotImage[i] = vkImages == null ? 0 : vkImages[i];
             slotBusy[i] = false;
@@ -233,17 +238,22 @@ public final class PresentQueue {
      * it (flipped, as the game's own blit does) once the game's queue has drawn it, and present it.
      * Returns the VkResult: VK_SUCCESS (or SUBOPTIMAL) when shown, VK_TIMEOUT when no image was free.
      */
-    static int show(int slot, long drawnValue) {
+    static int show(int slot, long drawnValue, VkQueue gameQueue) {
         long sc;
         long[] imgs;
         long[] presentSems;
-        int w, h;
+        int w, h, srcW, srcH;
         synchronized (PresentQueue.class) {
             sc = swapchain;
             imgs = images;
             presentSems = presentSemaphores;
-            w = swapchainWidth;
-            h = swapchainHeight;
+            // Like the game's own blit: the smaller of the two, so neither image is read or written
+            // past its edge while one of them has a new size (the window moved to another screen)
+            // and the other does not yet.
+            srcW = slotWidth;
+            srcH = slotHeight;
+            w = Math.min(swapchainWidth, srcW);
+            h = Math.min(swapchainHeight, srcH);
         }
         if (sc == 0 || slotImage[slot] == 0) return VK_ERROR_OUT_OF_DATE_KHR;
         PresentThread.LOCK.lock();
@@ -279,8 +289,11 @@ public final class PresentQueue {
             VK12.vkEndCommandBuffer(cb);
 
             VkSemaphoreSubmitInfo.Buffer waits = VkSemaphoreSubmitInfo.calloc(2, stack);
-            waits.get(0).sType$Default().semaphore(slotAcquire[slot]).stageMask(STAGE_TRANSFER);
-            waits.get(1).sType$Default().semaphore(timeline).value(drawnValue).stageMask(STAGE_TRANSFER);
+            // Waited at every stage (as the game's own blit does): the layout transition of the
+            // image is in the first barrier, which has no source stage, so a wait at the transfer
+            // stage alone let it run while the display was still reading the image (black frames).
+            waits.get(0).sType$Default().semaphore(slotAcquire[slot]).stageMask(STAGE_ALL);
+            waits.get(1).sType$Default().semaphore(timeline).value(drawnValue).stageMask(STAGE_ALL);
             VkSemaphoreSubmitInfo.Buffer signal = VkSemaphoreSubmitInfo.calloc(1, stack);
             signal.get(0).sType$Default().semaphore(presentSems[i]).stageMask(STAGE_ALL);
             VkCommandBufferSubmitInfo.Buffer cmds = VkCommandBufferSubmitInfo.calloc(1, stack);
@@ -295,7 +308,10 @@ public final class PresentQueue {
                     .swapchainCount(1)
                     .pSwapchains(stack.longs(sc))
                     .pImageIndices(stack.ints(i));
-            return KHRSwapchain.vkQueuePresentKHR(queue, present);
+            // Presented on the game's queue (the present only waits for the blit's semaphore): on a
+            // laptop panel driven by the integrated GPU (PRIME), frames presented from this second
+            // queue reached the screen black.
+            return KHRSwapchain.vkQueuePresentKHR(gameQueue != null ? gameQueue : queue, present);
         } finally {
             PresentThread.LOCK.unlock();
         }

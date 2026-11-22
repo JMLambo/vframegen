@@ -1768,8 +1768,24 @@ public final class FrameGenerator {
         return true;
     }
 
+    private int pendingWidth, pendingHeight;
+    private GpuFormat pendingFormat;
+
+    /**
+     * The pending buffers depend only on the window size and colour format. They used to be remade
+     * with everything else, so also when the render resolution changed (dynamic render scale, every
+     * few seconds), while generated frames were still queued for them: those were then shown from
+     * a buffer never drawn into (black) or from memory already reused by another texture (garbage).
+     */
     private void createPendingTextures(GpuDevice device, int w, int h, GpuFormat color) {
-        PresentQueue.setSlotImages(null);
+        if (w == pendingWidth && h == pendingHeight && color == pendingFormat
+                && (pendingTex[0] != null || !PresentQueue.available())) return;
+        // Nothing queued may be shown from the old buffers.
+        PresentThread.dropPending();
+        PresentQueue.setSlotImages(null, 0, 0);
+        pendingWidth = w;
+        pendingHeight = h;
+        pendingFormat = color;
         for (int i = 0; i < pendingTex.length; i++) {
             if (pendingTex[i] != null) pendingTex[i].close();
             pendingTex[i] = null;
@@ -1782,7 +1798,7 @@ public final class FrameGenerator {
             if (!(pendingTex[i] instanceof com.mojang.renderpearl.backend.vulkan.VulkanGpuTexture vk)) return;
             images[i] = vk.vkImage();
         }
-        PresentQueue.setSlotImages(images);
+        PresentQueue.setSlotImages(images, w, h);
     }
 
     /**
