@@ -95,10 +95,15 @@ void main() {
     vec3 m1 = vec3(0.0), m2 = vec3(0.0);
     float closest = Flags.x > 0.5 ? 0.0 : 1.0;
     ivec2 closestTexel = clamp(centre, ivec2(0), maxTexel);
-    bool hand = false;
+    // The held item is drawn without the jitter: this pixel is on it if the texel under it (no
+    // jitter) is. Its texels are left out of the world's reconstruction below.
+    bool hand = Jitter.w > 0.5 && !isSky(texelFetch(Hand, clamp(ivec2(lowPos), ivec2(0), maxTexel), 0).r);
+    float taps = 0.0;
     for (int y = -1; y <= 1; y++) {
         for (int x = -1; x <= 1; x++) {
             ivec2 t = clamp(centre + ivec2(x, y), ivec2(0), maxTexel);
+            if (Jitter.w > 0.5 && !isSky(texelFetch(Hand, t, 0).r)) continue;
+            taps += 1.0;
             vec3 c = max(texelFetch(Color, t, 0).rgb, vec3(0.0));
             vec2 d = (vec2(t) + 0.5 - Jitter.xy - lowPos) * scale; // in output pixels
             float w = exp(-2.29 * dot(d, d));
@@ -116,10 +121,10 @@ void main() {
                 closest = dz;
                 closestTexel = t;
             }
-            if (Jitter.w > 0.5 && abs(x) + abs(y) <= 1 && !isSky(texelFetch(Hand, t, 0).r)) hand = true;
         }
     }
-    vec3 current = wsum > 1.0e-4 ? sum / wsum : texelFetch(Color, clamp(centre, ivec2(0), maxTexel), 0).rgb;
+    vec3 current = wsum > 1.0e-4 ? sum / wsum : texture(Color, uv).rgb;
+    if (taps < 0.5) nearest = current;
 
     // The held item is drawn without the jitter, so its samples sit at the texel centres: read it
     // as is (rebuilding it from jittered positions would shake it a little every frame).
@@ -196,8 +201,8 @@ void main() {
     }
 
     vec3 history = sampleHistory(prevUv);
-    vec3 mean = m1 / 9.0;
-    vec3 sigma = sqrt(max(m2 / 9.0 - mean * mean, vec3(0.0)));
+    vec3 mean = m1 / max(taps, 1.0);
+    vec3 sigma = sqrt(max(m2 / max(taps, 1.0) - mean * mean, vec3(0.0)));
     vec3 lo = mean - 1.25 * sigma, hi = mean + 1.25 * sigma;
     history = fromYCoCg(clipToBox(toYCoCg(history), lo, hi));
 

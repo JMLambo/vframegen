@@ -100,6 +100,9 @@ final class ClothConfigScreen {
                 .setEnumNameProvider(v -> Component.translatable("vframegen.config.upscaler." + v.name().toLowerCase(java.util.Locale.ROOT)))
                 .setSaveConsumer(v -> cfg.upscaler = v).build();
         upscaling.addEntry(upscaler);
+        // Temporal upscaling anti-aliases on its own, except with a shader pack (spatial fallback).
+        Requirement temporalAa = Compat.irisShadersActive() ? () -> true
+                : Requirement.not(Requirement.isValue(upscaler, FrameGenConfig.Upscaler.TEMPORAL));
         upscaling.addEntry(e.startIntSlider(t("upscaleSharpness"), (int) Math.round(cfg.upscaleSharpness * 100), 0, 100)
                 .setDefaultValue((int) Math.round(def.upscaleSharpness * 100)).setTooltip(tip("upscaleSharpness"))
                 .setTextGetter(v -> Component.literal(v + "%"))
@@ -123,13 +126,12 @@ final class ClothConfigScreen {
         quality.addEntry(e.startEnumSelector(t("antiAliasing"), FrameGenConfig.AntiAliasingMode.class, cfg.antiAliasing)
                 .setDefaultValue(def.antiAliasing).setTooltip(tip("antiAliasing"))
                 .setEnumNameProvider(v -> Component.translatable("vframegen.config.antiAliasing." + v.name().toLowerCase(java.util.Locale.ROOT)))
-                // Temporal upscaling anti-aliases on its own.
-                .setRequirement(Requirement.not(Requirement.isValue(upscaler, FrameGenConfig.Upscaler.TEMPORAL)))
+                .setRequirement(temporalAa)
                 .setSaveConsumer(v -> cfg.antiAliasing = v).build());
         quality.addEntry(e.startIntSlider(t("antiAliasingQuality"), cfg.antiAliasingQuality, 1, 4)
                 .setDefaultValue(def.antiAliasingQuality).setTooltip(tip("antiAliasingQuality"))
                 .setTextGetter(v -> Component.translatable("vframegen.config.antiAliasingQuality." + v))
-                .setRequirement(Requirement.not(Requirement.isValue(upscaler, FrameGenConfig.Upscaler.TEMPORAL)))
+                .setRequirement(temporalAa)
                 .setSaveConsumer(v -> cfg.antiAliasingQuality = v).build());
         var motionBlur = e.startBooleanToggle(t("motionBlur"), cfg.motionBlur)
                 .setDefaultValue(def.motionBlur).setTooltip(tip("motionBlur"))
