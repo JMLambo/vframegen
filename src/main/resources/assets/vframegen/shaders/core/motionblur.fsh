@@ -26,6 +26,7 @@ uniform sampler2D World;  // Src world before the GUI
 uniform sampler2D Final;  // Src world + GUI
 uniform sampler2D Depth;  // Src depth
 uniform sampler2D Mask;   // Src held item mask (lockmask.fsh)
+uniform sampler2D Terrain; // Src depth before entities were drawn (BlurEnt.y)
 uniform sampler2D Vignette; // vanilla's vignette texture (bound to Color when there is none)
 
 layout(std140) uniform MotionBlur {
@@ -38,6 +39,8 @@ layout(std140) uniform MotionBlur {
     vec4 CrossTip[3];    // xy: axis end (uv), farthest first
     vec4 CrossColor[3];
     vec4 VignetteColor;  // rgb: vanilla's vignette color, w: apply it
+    vec4 BlurEnt;        // x: entities, y: Terrain valid
+    vec4 Ent[96];        // per entity: box min, box max (relative to Src's camera), motion since the previous shown frame
 };
 
 layout(location = 0) in vec2 texCoord;
@@ -90,6 +93,20 @@ vec3 crosshair(vec3 color, vec2 uv) {
     return color;
 }
 
+// How far the entity this pixel shows moved since the previous shown frame (zero for the world).
+// Only pixels an entity drew (their depth changed when entities were drawn), not blocks beside it.
+vec3 entityMotion(vec2 uv, float d, vec3 p) {
+    int n = int(BlurEnt.x);
+    if (n == 0) return vec3(0.0);
+    if (BlurEnt.y > 0.5 && abs(texture(Terrain, uv).r - d) <= 1.0e-7) return vec3(0.0);
+    for (int i = 0; i < n; i++) {
+        if (all(greaterThanEqual(p, Ent[i * 3].xyz)) && all(lessThanEqual(p, Ent[i * 3 + 1].xyz))) {
+            return Ent[i * 3 + 2].xyz;
+        }
+    }
+    return vec3(0.0);
+}
+
 vec3 blurred(vec2 uv, vec3 center) {
     if (Params.x <= 0.0 || fixedPixel(uv)) return center;
 
@@ -109,7 +126,9 @@ vec3 blurred(vec2 uv, vec3 center) {
         p = vec4(q.xyz / q.w, 1.0);
     }
     vec4 cur = CurViewProj * p;
-    vec4 prev = PrevViewProj * p;
+    // A moving entity was that much farther back when the previous frame was shown.
+    vec3 moved = p.w > 0.5 ? entityMotion(uv, d, p.xyz) : vec3(0.0);
+    vec4 prev = PrevViewProj * vec4(p.xyz - moved, p.w);
     if (cur.w <= 1.0e-6 || prev.w <= 1.0e-6) {
         return center;
     }

@@ -100,7 +100,7 @@ public final class FrameGenerator {
     private GpuTexture blurTex;
     private GpuTextureView blurView;
     private GpuBuffer blurUbo;
-    private static final int BLUR_UBO_SIZE = 3 * 64 + 10 * 16;
+    private static final int BLUR_UBO_SIZE = 3 * 64 + 11 * 16 + FrameSlot.MAX_ENTITIES * 3 * 16;
     // Vanilla's vignette, taken from this real frame's GUI (drawn by motionblur.fsh).
     private static final Identifier VIGNETTE = Identifier.withDefaultNamespace("textures/misc/vignette.png");
     // vignetteOn is what shown frames use; vignetteNext is set while this loop's GUI is extracted,
@@ -644,6 +644,9 @@ public final class FrameGenerator {
         Matrix4f prevViewProj = new Matrix4f(prevShownProj).mul(prevShownViewRot).translate(
                 (float) (src.pos.x - prevShownPos.x), (float) (src.pos.y - prevShownPos.y), (float) (src.pos.z - prevShownPos.z));
         double jump = prevShownPos.distance(pos);
+        long now = System.nanoTime();
+        float shownDt = prevShownNs == 0 ? 0f : Math.min((now - prevShownNs) / 1.0e9f, 0.1f);
+        prevShownNs = now;
         prevShownPos.set(pos);
         prevShownViewRot.set(viewRot);
         prevShownProj.set(proj);
@@ -667,6 +670,7 @@ public final class FrameGenerator {
                     .putVec4(1f / width, 1f / height, handBuffer ? 1f : 0f, nearLock ? 1f : 0f);
             putCrosshair(ub, viewRot);
             ub.putVec4(vignetteR, vignetteG, vignetteB, vignetteOn ? 1f : 0f);
+            putBlurEntities(ub, src, shownDt, blur);
             ByteBuffer data = ub.get();
             encoder.writeToBuffer(blurUbo.slice(), data);
         }
@@ -681,6 +685,7 @@ public final class FrameGenerator {
             pass.setUniform("Final", src.finalView, nearest);
             pass.setUniform("Depth", src.depthView, nearest);
             pass.setUniform("Mask", src.maskView, nearest);
+            pass.setUniform("Terrain", src.terrainDepthView, nearest);
             pass.setUniform("Vignette", vignette, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
             pass.setUniform("MotionBlur", blurUbo);
             pass.draw(3, 1, 0, 0);
@@ -752,6 +757,29 @@ public final class FrameGenerator {
         }
     }
 
+    private long prevShownNs;
+
+    /**
+     * Moving entities, for motion blur: where each one's box is (relative to src's camera) and how
+     * far it moved since the frame shown before. A mob the camera follows stays sharp.
+     */
+    private void putBlurEntities(Std140Builder ub, FrameSlot src, float dt, boolean on) {
+        int n = on ? src.entityCount : 0;
+        ub.putVec4(n, src.hasTerrainDepth ? 1f : 0f, 0f, 0f);
+        for (int i = 0; i < FrameSlot.MAX_ENTITIES; i++) {
+            if (i < n) {
+                float ox = (float) (src.entityPos[i * 3] - src.pos.x);
+                float oy = (float) (src.entityPos[i * 3 + 1] - src.pos.y);
+                float oz = (float) (src.entityPos[i * 3 + 2] - src.pos.z);
+                ub.putVec4(ox + src.entityBox[i * 6], oy + src.entityBox[i * 6 + 1], oz + src.entityBox[i * 6 + 2], 0f);
+                ub.putVec4(ox + src.entityBox[i * 6 + 3], oy + src.entityBox[i * 6 + 4], oz + src.entityBox[i * 6 + 5], 0f);
+                ub.putVec4(src.entityVel[i * 3] * dt, src.entityVel[i * 3 + 1] * dt, src.entityVel[i * 3 + 2] * dt, 0f);
+            } else {
+                ub.putVec4(0f, 0f, 0f, 0f).putVec4(0f, 0f, 0f, 0f).putVec4(0f, 0f, 0f, 0f);
+            }
+        }
+    }
+
     private RenderPipeline blurPipeline(GpuFormat format) {
         return blurPipelines.computeIfAbsent(format, f -> RenderPipeline.builder()
                 .withLocation(Identifier.fromNamespaceAndPath(VFrameGen.MOD_ID, "pipeline/motionblur_" + f.name().toLowerCase(Locale.ROOT)))
@@ -763,6 +791,7 @@ public final class FrameGenerator {
                         .withUniform("Final", UniformType.COMBINED_IMAGE_SAMPLER)
                         .withUniform("Depth", UniformType.COMBINED_IMAGE_SAMPLER)
                         .withUniform("Mask", UniformType.COMBINED_IMAGE_SAMPLER)
+                        .withUniform("Terrain", UniformType.COMBINED_IMAGE_SAMPLER)
                         .withUniform("Vignette", UniformType.COMBINED_IMAGE_SAMPLER)
                         .withUniform("MotionBlur", UniformType.UNIFORM_BUFFER)
                         .build())
@@ -1371,6 +1400,11 @@ public final class FrameGenerator {
             c.entityBox[i * 6 + 3] = (float) box.maxX;
             c.entityBox[i * 6 + 4] = (float) box.maxY;
             c.entityBox[i * 6 + 5] = (float) box.maxZ;
+            // Per tick to per second, at the tick rate (frozen: no motion).
+            float tps = ticks.isEntityFrozen(e) ? 0f : ticks.tickrate();
+            c.entityVel[i * 3] = (float) ((e.getX() - e.xo) * tps);
+            c.entityVel[i * 3 + 1] = (float) ((e.getY() - e.yo) * tps);
+            c.entityVel[i * 3 + 2] = (float) ((e.getZ() - e.zo) * tps);
         }
     }
 
