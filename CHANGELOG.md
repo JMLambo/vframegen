@@ -10,6 +10,8 @@
   "Hardware optical flow", greyed out on other GPUs); interpolated mode only. About 0.25 ms of
   render-thread time per real frame. Beta: tested on an RTX 4050 only so far; turn it off if
   generated frames look wrong.
+- Screenshots (F2) with render scale below 100% (for example dynamic render scale with a shader
+  pack) were the small world image without the GUI. They are the full-size picture again.
 - Adaptive frame generation can go up to 8x (fixed multipliers stay at 2x to 6x), for very low
   real frame rates.
 - Adaptive mode asks for fewer generated frames whenever some get dropped (drawn, but no swapchain
