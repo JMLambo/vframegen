@@ -12,6 +12,9 @@ public interface PresentQueuePlan {
 
     int vframegen$flowIndex();
 
+    /** The game's graphics family (the optical-flow images are shared with it). */
+    int vframegen$graphicsFamily();
+
     /** Device extensions to enable for optical flow (empty when unsupported). */
     java.util.List<String> vframegen$flowExtensions();
 }

@@ -58,6 +58,7 @@ public final class FrameGenConfig {
     public boolean debugTint = false;
     public boolean debugCaptures = false;
     public boolean debugFrameLog = false;
+    public boolean debugOpticalFlow = false;
     public boolean debugStatsLog = false;
     public boolean debugPacingLog = false;
     public boolean debugStallLog = false;
@@ -120,6 +121,8 @@ public final class FrameGenConfig {
             debugTint               tint generated frames magenta, to see which frames are generated.
             debugCaptures           F8 (or the controller button) saves the next frames as images.
             debugFrameLog           keep a log of the last ~10 s of presented frames; F8 saves it too.
+            debugOpticalFlow        NVIDIA RTX: measure motion with the GPU's optical flow hardware on every
+                                    real frame (not used for frames yet); F8 saves it as an image.
             debugStatsLog           every 5 s, log frame rates, timings and why frames were skipped.
             debugPacingLog          every second, log how evenly frames reached the screen.
             debugStallLog           log a breakdown of every game loop that took over 35 ms.
@@ -169,6 +172,7 @@ public final class FrameGenConfig {
                 c.debugTint = bool(props, "debugTint", c.debugTint);
                 c.debugCaptures = bool(props, "debugCaptures", c.debugCaptures);
                 c.debugFrameLog = bool(props, "debugFrameLog", c.debugFrameLog);
+                c.debugOpticalFlow = bool(props, "debugOpticalFlow", c.debugOpticalFlow);
                 c.debugStatsLog = bool(props, "debugStatsLog", c.debugStatsLog);
                 c.debugPacingLog = bool(props, "debugPacingLog", c.debugPacingLog);
                 c.debugStallLog = bool(props, "debugStallLog", c.debugStallLog);
@@ -234,6 +238,7 @@ public final class FrameGenConfig {
         values.put("debugTint", Boolean.toString(debugTint));
         values.put("debugCaptures", Boolean.toString(debugCaptures));
         values.put("debugFrameLog", Boolean.toString(debugFrameLog));
+        values.put("debugOpticalFlow", Boolean.toString(debugOpticalFlow));
         values.put("debugStatsLog", Boolean.toString(debugStatsLog));
         values.put("debugPacingLog", Boolean.toString(debugPacingLog));
         values.put("debugStallLog", Boolean.toString(debugStallLog));

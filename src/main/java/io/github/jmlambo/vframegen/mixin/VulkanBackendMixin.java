@@ -48,7 +48,7 @@ public abstract class VulkanBackendMixin {
             info.pNext(features.address());
             int result = original.call(physical, info, allocator, device);
             if (result == 0) {
-                OpticalFlow.enabled(plan.vframegen$flowFamily(), plan.vframegen$flowIndex());
+                OpticalFlow.enabled(plan.vframegen$flowFamily(), plan.vframegen$flowIndex(), plan.vframegen$graphicsFamily());
                 return result;
             }
             // The driver refused; fall back to the game's own device so the game still starts.

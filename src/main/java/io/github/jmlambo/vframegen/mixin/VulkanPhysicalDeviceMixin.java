@@ -39,6 +39,11 @@ public abstract class VulkanPhysicalDeviceMixin implements PresentQueuePlan {
     private java.util.List<String> vframegen$flowExtensions = java.util.List.of();
 
     @Override
+    public int vframegen$graphicsFamily() {
+        return graphicsQueueFamilyAndIndex == null ? -1 : graphicsQueueFamilyAndIndex.leftInt();
+    }
+
+    @Override
     public int vframegen$flowFamily() {
         return vframegen$flowFamily;
     }
@@ -119,7 +124,7 @@ public abstract class VulkanPhysicalDeviceMixin implements PresentQueuePlan {
                 }
             }
         }
-        if (family < 0) return;
+        if (family < 0 || graphicsQueueFamilyAndIndex == null) return;
         java.util.List<String> extensions = new java.util.ArrayList<>(java.util.List.of(flow));
         // Dependencies of VK_NV_optical_flow; already core on Vulkan 1.3, listed only when the driver offers them.
         for (String dep : new String[]{"VK_KHR_synchronization2", "VK_KHR_format_feature_flags2"}) {

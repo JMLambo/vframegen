@@ -1031,6 +1031,7 @@ public final class FrameGenerator {
     private void endCapture(FrameSlot nowShowing) {
         if (!capture) return;
         if (nowShowing != null) DebugCapture.save(nowShowing.finalImage, "9-real-B");
+        if (OpticalFlow.result() != null) DebugCapture.save(OpticalFlow.result(), "9-optical-flow");
         DebugCapture.writeLog(captureLog.toString());
         DebugCapture.end();
         capture = false;
@@ -1701,6 +1702,7 @@ public final class FrameGenerator {
         c.level = Minecraft.getInstance().level;
         c.hasFinal = false;
         c.valid = true;
+        if (VFrameGen.config().debugOpticalFlow) OpticalFlow.measure(c.noHand);
         buildMask(c);
         // With a shader pack the depth buffer has the water surface in it (see captureOpaqueDepth);
         // Iris keeps the depth from before translucents. Taken after buildMask, which needs the
