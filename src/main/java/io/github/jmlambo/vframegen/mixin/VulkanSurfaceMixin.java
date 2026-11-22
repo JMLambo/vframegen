@@ -63,9 +63,40 @@ public abstract class VulkanSurfaceMixin {
         }
     }
 
+    @org.spongepowered.asm.mixin.Shadow
+    private long swapchain;
+    @org.spongepowered.asm.mixin.Shadow
+    private int swapchainWidth;
+    @org.spongepowered.asm.mixin.Shadow
+    private int swapchainHeight;
+    @org.spongepowered.asm.mixin.Shadow
+    @org.spongepowered.asm.mixin.Final
+    private it.unimi.dsi.fastutil.longs.LongList swapchainImages;
+    // What the swapchain was really created with (other mods, an HDR mod, change these on the way).
+    @org.spongepowered.asm.mixin.Unique
+    private int vframegen$createdFormat = -1;
+    @org.spongepowered.asm.mixin.Unique
+    private int vframegen$createdColorSpace = -1;
+
+    @WrapOperation(method = "configure", require = 0, at = @At(value = "INVOKE",
+            target = "Lorg/lwjgl/vulkan/KHRSwapchain;vkCreateSwapchainKHR(Lorg/lwjgl/vulkan/VkDevice;Lorg/lwjgl/vulkan/VkSwapchainCreateInfoKHR;Lorg/lwjgl/vulkan/VkAllocationCallbacks;Ljava/nio/LongBuffer;)I"))
+    private int vframegen$recordFormat(VkDevice device, org.lwjgl.vulkan.VkSwapchainCreateInfoKHR info,
+            org.lwjgl.vulkan.VkAllocationCallbacks allocator, java.nio.LongBuffer handle, Operation<Integer> original) {
+        vframegen$createdFormat = info.imageFormat();
+        vframegen$createdColorSpace = info.imageColorSpace();
+        return original.call(device, info, allocator, handle);
+    }
+
     @Inject(method = {"configure", "close"}, at = @At("HEAD"))
     private void vframegen$drainBeforeRecreate(CallbackInfo ci) {
         PresentThread.drain();
+        io.github.jmlambo.vframegen.PresentQueue.waitIdle();
+    }
+
+    // The present queue blits generated frames into this swapchain's images itself.
+    @Inject(method = "configure", at = @At("RETURN"))
+    private void vframegen$shareSwapchain(CallbackInfo ci) {
+        io.github.jmlambo.vframegen.PresentQueue.onSwapchain(swapchain, swapchainImages, swapchainWidth, swapchainHeight, vframegen$createdFormat, vframegen$createdColorSpace);
     }
 
     @Inject(method = "configure", at = @At("HEAD"))
