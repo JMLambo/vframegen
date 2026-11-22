@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.0-beta.3
+
 - Hardware optical flow on NVIDIA RTX (20 series and newer, Vulkan), in beta: the GPU's optical flow unit
   measures how the picture moved between the two real frames, and generated frames follow the part
   depth reprojection cannot see (mob limbs, fire, particles, water, animated textures). Camera and
