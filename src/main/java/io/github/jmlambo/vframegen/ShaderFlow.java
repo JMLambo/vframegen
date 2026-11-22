@@ -107,6 +107,7 @@ public final class ShaderFlow {
 
     /** The flow measured between these two world images (FrameSlot.noHand), or null. */
     public static OpticalFlow.Pair forPair(GpuTexture older, GpuTexture newer) {
+        if (broken) return null;
         for (OpticalFlow.Pair p : pairs) if (p.valid && p.older == older && p.newer == newer) return p;
         return null;
     }
@@ -114,9 +115,13 @@ public final class ShaderFlow {
     /** Render thread, once a real frame's world image (without the hand) is captured. */
     public static void measure(GpuTexture world) {
         if (broken) return;
+        // This image now holds a new frame: flows measured with its old contents no longer apply
+        // (before anything that can fail).
+        for (OpticalFlow.Pair p : pairs) if (p.older == world || p.newer == world) p.valid = false;
         try {
-            measure0(world);
-            failures = 0;
+            // Reset only once a whole measurement (both searches) succeeded: a failing search
+            // shader must still reach the limit below.
+            if (measure0(world)) failures = 0;
         } catch (RuntimeException e) {
             // Shaders are not loaded yet during startup and resource reloads: try again next frame.
             // If it keeps failing, it is off for good (the setting greys out).
@@ -130,7 +135,8 @@ public final class ShaderFlow {
         }
     }
 
-    private static void measure0(GpuTexture world) {
+    /** True when a pair was measured (false: only this frame's pyramid, there was no last frame). */
+    private static boolean measure0(GpuTexture world) {
         int w = world.getWidth(0), h = world.getHeight(0);
         if (w != worldW || h != worldH || grid == null) create(w, h);
         GpuDevice device = RenderSystem.getDevice();
@@ -140,7 +146,9 @@ public final class ShaderFlow {
         int next = current < 0 ? 0 : 1 - current;
         readTimers();
         GpuQueryPool timer = null;
-        if (!timersUnsupported && timers.size() < 8) {
+        // Timed only when there is a last frame to measure against (the timer is then always
+        // either queued or closed).
+        if (!timersUnsupported && timers.size() < 8 && current >= 0 && lastWorld != null) {
             try {
                 timer = device.createTimestampQueryPool(2);
                 encoder.writeTimestamp(timer, 0);
@@ -150,6 +158,8 @@ public final class ShaderFlow {
                 timersUnsupported = true; // then the resolution stays at its start value
             }
         }
+        boolean queued = false;
+        try {
 
         // Brightness pyramid of this frame.
         try (GpuTextureView src = device.createTextureView(world)) {
@@ -160,12 +170,11 @@ public final class ShaderFlow {
             pass(encoder, "VFrameGen flow pyramid", downPipeline, pyramidView[next][l], p -> p.setUniform("Src", src, nearest));
         }
 
-        for (OpticalFlow.Pair p : pairs) if (p.older == world || p.newer == world) p.valid = false;
         GpuTexture older = lastWorld;
         lastWorld = world;
         int prev = current;
         current = next;
-        if (prev < 0 || older == null) return;
+        if (prev < 0 || older == null) return false;
 
         OpticalFlow.Pair pair = pairs[nextPair];
         nextPair = (nextPair + 1) % pairs.length;
@@ -189,6 +198,7 @@ public final class ShaderFlow {
         if (timer != null) {
             encoder.writeTimestamp(timer, 1);
             timers.add(timer);
+            queued = true;
         }
         pair.pixelsPerUnit = 1f;
         pair.width = w;
@@ -197,6 +207,10 @@ public final class ShaderFlow {
         pair.newer = world;
         pair.copied = true;
         pair.valid = true;
+        return true;
+        } finally {
+            if (timer != null && !queued) timer.close();
+        }
     }
 
     private static void search(CommandEncoder encoder, int cur, int ref, GpuTextureView out, GpuSampler linear, GpuSampler nearest) {
@@ -229,10 +243,21 @@ public final class ShaderFlow {
 
     private static void create(int w, int h) {
         release();
-        GpuDevice device = RenderSystem.getDevice();
-        if (lumaPipeline == null) createPipelines();
+        // Marked created only at the end: if an allocation fails, the next measurement retries.
+        worldW = worldH = -1;
+        try {
+            create0(w, h);
+        } catch (RuntimeException e) {
+            release();
+            throw e;
+        }
         worldW = w;
         worldH = h;
+    }
+
+    private static void create0(int w, int h) {
+        GpuDevice device = RenderSystem.getDevice();
+        if (lumaPipeline == null) createPipelines();
         int w0 = Math.max(BLOCK * 8, Math.min(maxWidth, w / 2));
         int h0 = Math.max(BLOCK * 8, Math.round((float) h * w0 / w));
         int n = 1;
@@ -313,23 +338,33 @@ public final class ShaderFlow {
                 .build();
     }
 
+    /** Frees everything; tolerates arrays only partly filled (a failed create). */
     private static void release() {
         for (int f = 0; f < 2; f++) {
-            if (pyramid[f] == null) continue;
-            for (GpuTextureView v : pyramidView[f]) v.close();
-            for (GpuTexture t : pyramid[f]) t.close();
+            closeAll(pyramidView[f]);
+            closeAll(pyramid[f]);
             pyramid[f] = null;
             pyramidView[f] = null;
         }
-        if (grid != null) {
-            for (GpuTextureView v : gridView) v.close();
-            for (GpuTexture t : grid) t.close();
-            for (GpuTextureView v : rawGridView) v.close();
-            for (GpuTexture t : rawGrid) t.close();
-            for (GpuBuffer b : ubo) b.close();
-        }
+        closeAll(gridView);
+        closeAll(grid);
+        closeAll(rawGridView);
+        closeAll(rawGrid);
+        closeAll(ubo);
         grid = rawGrid = null;
         gridView = rawGridView = null;
         ubo = null;
+    }
+
+    private static void closeAll(AutoCloseable[] items) {
+        if (items == null) return;
+        for (AutoCloseable c : items) {
+            if (c == null) continue;
+            try {
+                c.close();
+            } catch (Exception ignored) {
+                // closing never fails in practice; keep freeing the rest
+            }
+        }
     }
 }
