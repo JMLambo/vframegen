@@ -130,6 +130,17 @@ public final class FrameGenerator {
     private boolean gpuTimersUnsupported;
     private long gpuPassNs;
     private int gpuPassCount;
+    // Smoothed GPU time of one generated frame (0: not measured yet), for adaptive mode's budget.
+    private double gpuPassAvgNs;
+    private int gpuPassStale; // timers still pending from before the last invalidate()
+    // Smoothed render-thread time to hand one generated frame over (blit, submit, present). Small
+    // while the GPU keeps up; when it is overloaded the hand-over waits for it, so this grows: the
+    // copies, presents and other programs' GPU work (a screen recorder) the pass timer can't see.
+    private double genWallAvgNs;
+
+    private void noteGenWall(long ns) {
+        genWallAvgNs = genWallAvgNs <= 0 ? ns : genWallAvgNs + (ns - genWallAvgNs) * 0.05;
+    }
     private final Map<String, RenderPipeline> pipelines = new HashMap<>();
     private boolean broken;
 
@@ -274,6 +285,13 @@ public final class FrameGenerator {
         held = null;
         building = null;
         genPlanned = false;
+        // The auto cap's samples carry over between seconds; not across a pause or settings change.
+        fitCount = missCount = roomySeconds = badSeconds = 0;
+        minSlackMs = Double.MAX_VALUE;
+        // A settings change can change what a generated frame costs: measure it again.
+        gpuPassAvgNs = 0;
+        genWallAvgNs = 0;
+        gpuPassStale = gpuTimers.size();
     }
 
 
@@ -394,7 +412,8 @@ public final class FrameGenerator {
         int total = fitCount + missCount;
         if (total >= 10 && lastAutoCap > 0) {
             boolean bad = missCount * 5 > total; // more than 20% early or late
-            boolean roomy = missCount == 0 && minSlackMs > 4.0;
+            // (Some slack measured: frames made at loop start have none.)
+            boolean roomy = missCount == 0 && minSlackMs < Double.MAX_VALUE && minSlackMs > 4.0;
             badSeconds = bad ? badSeconds + 1 : 0;
             roomySeconds = roomy ? roomySeconds + 1 : 0;
             if (badSeconds >= 2) {
@@ -404,9 +423,11 @@ public final class FrameGenerator {
                 capAdjust -= 2;
                 roomySeconds = 0;
             }
+            fitCount = missCount = 0;
+            minSlackMs = Double.MAX_VALUE;
         }
-        fitCount = missCount = 0;
-        minSlackMs = Double.MAX_VALUE;
+        // Fewer than ten generated frames this second (adaptive's GPU budget can allow only a few
+        // on a slow GPU): keep counting into the next second, so the cap can still come back up.
     }
 
     /**
@@ -886,6 +907,25 @@ public final class FrameGenerator {
     private static final long DROP_CEILING_LOWER_NS = 250_000_000L;
     private static final long DROP_CEILING_RAISE_NS = 500_000_000L;
 
+    // Share of the time between real frames that generated frames may take on the GPU. The GPU
+    // that draws them also draws the real frames, so where one costs as much as a few ms (a laptop
+    // iGPU at 1080p), asking for more and more of them to reach the target only slowed the real
+    // frames, which asked for even more: 60 real fps fell to 15. With this share the time between
+    // real frames settles at most 1 / (1 - share) of what it was (real fps keeps 75% or more).
+    // No floor: where even one generated frame per real frame is too much, only some pairs get
+    // one (1.4x), down to none.
+    private static final double GPU_BUDGET_SHARE = 0.25;
+
+    /** The most frames per real frame whose generated frames fit in that GPU budget. */
+    private double gpuBudgetCeiling() {
+        // What one generated frame costs: its pass on the GPU, plus any wait to hand it over.
+        // Without the GPU timer (timestamp queries unsupported) the cost is unknown: the hand-over
+        // wait alone would undercount it, so no budget rather than a wrong one.
+        if (gpuPassAvgNs <= 0 || adaptiveIntervalNs <= 0) return FrameGenConfig.ADAPTIVE_MAX_MULTIPLIER;
+        double cost = gpuPassAvgNs + Math.max(0, genWallAvgNs);
+        return Math.clamp(1.0 + GPU_BUDGET_SHARE * adaptiveIntervalNs / cost, 1.0, FrameGenConfig.ADAPTIVE_MAX_MULTIPLIER);
+    }
+
     private double adaptiveCeiling() {
         long now = System.nanoTime();
         if (PresentThread.takeDropped() > 0) {
@@ -912,6 +952,7 @@ public final class FrameGenerator {
                     : adaptiveIntervalNs + (intervalNs - adaptiveIntervalNs) * 0.1;
         }
         if (adaptiveIntervalNs <= 0) return adaptiveFrames;
+        most = Math.min(most, gpuBudgetCeiling());
         double ideal = Math.clamp(cfg.targetFps * adaptiveIntervalNs / 1e9, 1.0, most);
         adaptiveCarry += ideal;
         adaptiveFrames = (int) Math.clamp(Math.floor(adaptiveCarry + 1.0e-6), 1, (int) Math.ceil(most));
@@ -923,7 +964,7 @@ public final class FrameGenerator {
     public double adaptiveMultiplier() {
         FrameGenConfig cfg = VFrameGen.config();
         if (!cfg.adaptive || adaptiveIntervalNs <= 0) return 0;
-        return Math.clamp(cfg.targetFps * adaptiveIntervalNs / 1e9, 1.0, dropCeiling);
+        return Math.clamp(cfg.targetFps * adaptiveIntervalNs / 1e9, 1.0, Math.min(dropCeiling, gpuBudgetCeiling()));
     }
 
     /** True while a generated frame is being submitted (see VulkanTransientMemoryMixin). */
@@ -1180,6 +1221,7 @@ public final class FrameGenerator {
         long t2 = System.nanoTime();
         costSubmitNs += t1 - t0;
         costPresentNs += t2 - t1;
+        noteGenWall(t2 - t0);
         notePresent();
         screenEvent(System.nanoTime() + (gpuPassCount == 0 ? 1_000_000L : gpuPassNs / gpuPassCount), false);
         statsGenerated++;
@@ -1491,8 +1533,11 @@ public final class FrameGenerator {
             if (t0.isEmpty() || t1.isEmpty()) return;
             gpuTimers.poll();
             pool.close();
-            gpuPassNs += Math.max(0, t1.getAsLong() - t0.getAsLong());
+            long pass = Math.max(0, t1.getAsLong() - t0.getAsLong());
+            gpuPassNs += pass;
             gpuPassCount++;
+            if (gpuPassStale > 0) gpuPassStale--; // measured before invalidate(): the old workload
+            else gpuPassAvgNs = gpuPassAvgNs <= 0 ? pass : gpuPassAvgNs + (pass - gpuPassAvgNs) * 0.05;
         }
     }
 
@@ -1910,6 +1955,7 @@ public final class FrameGenerator {
         long t1 = System.nanoTime();
         costSubmitNs += t1 - t0;
         genCostNs += t1 - t0;
+        noteGenWall(t1 - t0);
         notePresent();
         screenEvent(System.nanoTime() + (gpuPassCount == 0 ? 1_000_000L : gpuPassNs / gpuPassCount), false);
         statsGenerated++;
