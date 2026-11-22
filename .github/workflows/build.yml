@@ -37,3 +37,30 @@ jobs:
           name: vframegen-${{ github.sha }}
           path: build/libs/*.jar
           if-no-files-found: error
+
+
+  # VirusTotal scan of the jar (.github/scripts/virustotal.sh), on pull requests only: main only
+  # changes through them, and release jars are scanned by the Release workflow.
+  virustotal:
+    if: github.event_name == 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    # One pull request scan at a time: they share the API key's 4 requests a minute.
+    concurrency:
+      group: virustotal
+      cancel-in-progress: false
+      queue: max # every waiting scan stays queued (default: only the newest one)
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Download the mod jar
+        uses: actions/download-artifact@v8
+        with:
+          name: vframegen-${{ github.sha }}
+          path: jars
+
+      - name: Scan with VirusTotal
+        env:
+          VT_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
+        run: .github/scripts/virustotal.sh "$(ls jars/*.jar | grep -v -- '-sources\.jar$' | head -n1)"
