@@ -77,7 +77,9 @@ public final class PresentQueue {
     private static final long[] slotAcquire = new long[SLOTS];
     // A slot is busy from the frame drawn into it until its blit has finished on this queue.
     private static final boolean[] slotBusy = new boolean[SLOTS];
-    private static final boolean[] slotSubmitted = new boolean[SLOTS];
+    // Written by the present thread inside PresentThread.LOCK: atomic, so it never needs this class's
+    // monitor there (waitIdle takes the monitor, then LOCK; the opposite order deadlocked).
+    private static final java.util.concurrent.atomic.AtomicIntegerArray slotSubmitted = new java.util.concurrent.atomic.AtomicIntegerArray(SLOTS);
     private static int nextSlot;
 
     // The window's swapchain (VulkanSurfaceMixin), and one present semaphore per image of it.
@@ -136,9 +138,12 @@ public final class PresentQueue {
         }
     }
 
-    /** Whether the device has the present queue (pending buffers can be made for it). */
+    /**
+     * Whether pending buffers are worth making: the device has the queue, the present thread is on
+     * and the swapchain is plain 8-bit sRGB (otherwise ready() is false and they would go unused).
+     */
     public static boolean available() {
-        return queue != null;
+        return queue != null && PresentThread.enabled() && plainFormat;
     }
 
     /** Whether generated frames can wait in pending buffers (a queue, a swapchain, buffers). */
@@ -158,7 +163,7 @@ public final class PresentQueue {
         for (int i = 0; i < SLOTS; i++) {
             slotImage[i] = vkImages == null ? 0 : vkImages[i];
             slotBusy[i] = false;
-            slotSubmitted[i] = false;
+            slotSubmitted.set(i, 0);
         }
     }
 
@@ -212,8 +217,8 @@ public final class PresentQueue {
             PresentThread.LOCK.unlock();
         }
         for (int i = 0; i < SLOTS; i++) {
-            if (slotSubmitted[i]) {
-                slotSubmitted[i] = false;
+            if (slotSubmitted.get(i) != 0) {
+                slotSubmitted.set(i, 0);
                 slotBusy[i] = false;
             }
         }
@@ -226,9 +231,9 @@ public final class PresentQueue {
     public static synchronized int takeSlot() {
         for (int n = 0; n < SLOTS; n++) {
             int i = (nextSlot + n) % SLOTS;
-            if (slotBusy[i] && slotSubmitted[i] && VK12.vkGetFenceStatus(device, slotFence[i]) == VK_SUCCESS) {
+            if (slotBusy[i] && slotSubmitted.get(i) != 0 && VK12.vkGetFenceStatus(device, slotFence[i]) == VK_SUCCESS) {
                 slotBusy[i] = false;
-                slotSubmitted[i] = false;
+                slotSubmitted.set(i, 0);
             }
             if (!slotBusy[i]) {
                 slotBusy[i] = true;
@@ -241,7 +246,7 @@ public final class PresentQueue {
 
     /** Present thread: a pending frame was dropped (never blitted); its buffer is free again. */
     public static synchronized void release(int slot) {
-        if (slot >= 0 && !slotSubmitted[slot]) slotBusy[slot] = false;
+        if (slot >= 0 && slotSubmitted.get(slot) == 0) slotBusy[slot] = false;
     }
 
     public static long timeline() {
@@ -280,9 +285,7 @@ public final class PresentQueue {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             // The fence of this slot's last blit was waited for before the slot was handed out.
             VK12.vkResetFences(device, slotFence[slot]);
-            synchronized (PresentQueue.class) {
-                slotSubmitted[slot] = true; // every path below submits something that signals the fence
-            }
+            slotSubmitted.set(slot, 1); // every path below submits something that signals the fence
             IntBuffer index = stack.mallocInt(1);
             int acquired = KHRSwapchain.vkAcquireNextImageKHR(device, sc, 4_000_000L, slotAcquire[slot], 0L, index);
             if (acquired != VK_SUCCESS && acquired != VK_SUBOPTIMAL_KHR) {
