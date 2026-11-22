@@ -10,18 +10,29 @@ if [ -z "${VT_KEY:-}" ]; then
 fi
 jar="$1"
 api=https://www.virustotal.com/api/v3
+sha=$(sha256sum "${jar}" | cut -d' ' -f1)
 # Upload, retrying when the free API's 4 requests a minute are used up (another scan running).
+# 409: VirusTotal already has this exact file and is still analysing it (a rebuild that changed
+# nothing in the jar, such as a changelog-only commit): read that file's report instead.
 id=""
+existing=false
 for attempt in 1 2 3 4; do
-  id=$(curl -sfS -H "x-apikey: ${VT_KEY}" -F "file=@${jar}" "${api}/files" | jq -r '.data.id // empty') && [ -n "${id}" ] && break
-  echo "VirusTotal upload refused (attempt ${attempt}); retrying in 30 seconds"
+  code=$(curl -sS -o /tmp/vt-upload.json -w '%{http_code}' -H "x-apikey: ${VT_KEY}" -F "file=@${jar}" "${api}/files" || echo 000)
+  if [ "${code}" = 200 ]; then
+    id=$(jq -r '.data.id // empty' /tmp/vt-upload.json)
+    [ -n "${id}" ] && break
+  elif [ "${code}" = 409 ]; then
+    echo "VirusTotal already has this jar (${sha}); using its report"
+    existing=true
+    break
+  fi
+  echo "VirusTotal upload refused (HTTP ${code}, attempt ${attempt}); retrying in 30 seconds"
   sleep 30
 done
-if [ -z "${id}" ]; then
+if [ -z "${id}" ] && [ "${existing}" != true ]; then
   echo "::error::Could not submit the jar to VirusTotal"
   exit 1
 fi
-sha=$(sha256sum "${jar}" | cut -d' ' -f1)
 # The free API allows 4 requests a minute per key. Poll every 30 seconds (2 a minute), so a pull
 # request scan and a release scan running at the same time still fit; a refused poll is retried at
 # the next one. Up to 15 minutes.
@@ -29,9 +40,17 @@ status=""
 analysis="{}"
 for i in $(seq 30); do
   sleep 30
-  reply=$(curl -sfS -H "x-apikey: ${VT_KEY}" "${api}/analyses/${id}" || true)
-  [ -n "${reply}" ] || continue
-  analysis="${reply}"
+  if [ "${existing}" = true ]; then
+    # The file's own report: its last analysis, once there is one.
+    reply=$(curl -sfS -H "x-apikey: ${VT_KEY}" "${api}/files/${sha}" || true)
+    [ -n "${reply}" ] || continue
+    analysis=$(echo "${reply}" | jq -c '{data: {attributes: {stats: .data.attributes.last_analysis_stats,
+      status: (if (.data.attributes.last_analysis_date // 0) > 0 then "completed" else "queued" end)}}}')
+  else
+    reply=$(curl -sfS -H "x-apikey: ${VT_KEY}" "${api}/analyses/${id}" || true)
+    [ -n "${reply}" ] || continue
+    analysis="${reply}"
+  fi
   status=$(echo "${analysis}" | jq -r '.data.attributes.status // empty')
   # Partial results already over the threshold are enough to stop.
   [ "${status}" = completed ] && break
