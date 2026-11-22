@@ -133,6 +133,17 @@ Frame generation makes motion smoother; it does not make the game itself run fas
   one is ready, so the frames in between can be built from both; that adds about one real frame of
   delay (less noticeable at higher real frame rates). Low-latency mode does not hold frames back, at
   some cost in accuracy, and Reflex helps either way.
+- **On integrated graphics, use upscaling and anti-aliasing instead.** (If your PC doesn't have a
+  dedicated graphics card, this means you.) Integrated graphics share the computer's memory and
+  have far less GPU power, and a generated frame needs nearly the same work as a real one to put on
+  screen: reprojecting every pixel, copying the image, and presenting it. On a Radeon 660M at
+  1080p, each generated frame cost about as much time as a real one, so 50 real fps with frame
+  generation off became about 40 real + 20 generated: a little smoother, but the game itself
+  responded worse. A render scale below 100% with an upscaler and FXAA or SMAA makes the real
+  frames cheaper instead, which raises the real frame rate outright, with no artifacts. Adaptive
+  mode keeps generated frames to a share of the GPU's time, so leaving frame generation on can't
+  drag the real frame rate down far, but at 1080p it gains little. (It does better at lower
+  window resolutions, where each generated frame costs less.)
 - **With a shader pack, use upscaling too.** A render scale of about 75–85% (edge-adaptive, which
   is what Temporal falls back to with a pack) frees the most GPU time where it is scarcest: a
   higher real frame rate means less input delay, fewer artifacts, and generated frames that have
