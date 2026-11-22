@@ -8,15 +8,16 @@
 
 Frame generation for Minecraft **26.3** (Fabric) that works on the **Vulkan** renderer, as well as
 OpenGL, including with **Iris shader packs**, **Sodium** and **Distant Horizons**. It also has
-**render scale** upscaling.
+**render scale** upscaling (spatial or temporal), **dynamic render scale** and **anti-aliasing**,
+so a weaker PC can play smoothly at a decent resolution.
 
 Other frame-generation mods call OpenGL directly. VFrameGen draws through Mojang's own renderer
 abstraction (`com.mojang.renderpearl`): textures, render pipelines with GLSL shaders the game
 compiles itself, and the window surface. On Vulkan it adds a few low-level hooks for exact frame
 pacing.
 
-> **Status: alpha.** It works well on the setup it was developed on (see
-> [Tested with](#tested-with)). Expect rough edges on other hardware and mod combinations, and
+> **Status: beta.** All planned features are in and it works well on the setups it was tested on
+> (see [Tested with](#tested-with)). Expect rough edges on other hardware and mod combinations, and
 > please [report them](https://github.com/JMLambo/vframegen/issues/new/choose).
 
 ## Installing
@@ -25,11 +26,16 @@ pacing.
    [Fabric API](https://modrinth.com/mod/fabric-api).
 2. Download the jar from [Releases](https://github.com/JMLambo/vframegen/releases) and put it in
    your `mods` folder.
-3. Optional: [Mod Menu](https://modrinth.com/mod/modmenu) and
-   [Cloth Config](https://modrinth.com/mod/cloth-config) for the settings screen, and
+3. Optional: [Sodium](https://modrinth.com/mod/sodium) (VFrameGen adds a page to its video
+   settings), [Mod Menu](https://modrinth.com/mod/modmenu) and
+   [Cloth Config](https://modrinth.com/mod/cloth-config) for the full settings screen, and
    [Controlify](https://modrinth.com/mod/controlify) for controller bindings.
 4. In game, select **Video Settings → Graphics Backend → Vulkan** for the best pacing, turn
    **VSync off**, and press **F9** to toggle frame generation.
+
+On the first launch, VFrameGen measures your PC for a few seconds in the first world you join and
+picks a [preset](#presets) and a target frame rate (your display's refresh rate). A message says
+what it picked; change it any time in the settings.
 
 Requires Java 25, which Minecraft 26.3 already uses.
 
@@ -40,7 +46,7 @@ Requires Java 25, which Minecraft 26.3 already uses.
 | Minecraft | 26.3, Fabric Loader 0.19.5+ |
 | Backend | Vulkan (present thread) and OpenGL, both with and without shader packs |
 | GPU / OS | NVIDIA RTX 4050 Laptop and AMD Radeon 660M (integrated, RADV), Linux (Fedora, KDE Wayland); NVIDIA GTX 1060 3 GB with an i7-7700 and 8 GB RAM, Windows (vanilla renderer, Vulkan) |
-| Mods | Sodium 0.9.3-beta.4, Iris 1.12 (a local build with Distant Horizons 3.4 support), Distant Horizons 3.4.0-RC2, Controlify 3.5.3, Reflex 1.1.6. Also tested without Sodium, Iris and Distant Horizons (vanilla renderer) on both backends. |
+| Mods | Sodium 0.9.3, Iris 1.12 (a local build with Distant Horizons 3.4 and Sodium 0.9.3 support), Distant Horizons 3.4, Entity Model Features / Entity Texture Features with Fresh Animations, Controlify 3.5.3, Reflex 1.1.6. Also tested without Sodium, Iris and Distant Horizons (vanilla renderer) on both backends. |
 | Shader packs | Complementary Unbound r5.10 + Euphoria Patches 1.11.2 (RTX 4050), Mellow 3.5 (Radeon 660M: about 30 real fps on its Fancy preset) |
 
 On integrated graphics, frame generation itself is cheap (about 0.4 ms per generated frame on the
@@ -61,7 +67,11 @@ between the one on screen (A) and the held one (B) are built from both, then B i
    could not see.
 3. The camera between two frames blends position, rotation, projection and the view matrix's
    offset, so view bobbing stays smooth.
-4. The held item and the GUI are not warped. They come from the frame nearer in time.
+4. **Moving entities** (mobs, players, boats, minecarts) move with their own motion between the
+   two frames, not just the camera's. VFrameGen tracks the 32 nearest by their position and
+   bounding box, never their model, so it works the same with model mods such as Entity Model
+   Features and Fresh Animations.
+5. The held item and the GUI are not warped. They come from the frame nearer in time.
 
 **Adaptive frame generation** (off by default). Instead of a fixed multiplier, VFrameGen picks
 how many frames to show per real frame (1 to 6) so that real and generated frames together reach a
@@ -99,28 +109,58 @@ hand.
 - **Reflex**: works with the present thread, and recommended: it noticeably cuts input lag with
   frame generation on.
 
+## Presets
+
+**General → Preset** (also on the Sodium page) sets frame generation, render scale, upscaling and
+anti-aliasing together. Changing any of them by hand shows **Custom**.
+
+| Preset | Frame generation | Render scale | Upscaler | Anti-aliasing |
+|---|---|---|---|---|
+| Low-end | adaptive | dynamic | bicubic | FXAA |
+| Balanced | adaptive | dynamic | edge-adaptive (FSR 1) | SMAA |
+| Quality | adaptive | 100% | temporal (TAA) | from the temporal upscaler |
+
 ## Render scale
 
 **Upscaling → Render scale** (50–100%). The world and the shader pack render at a fraction of the
-window size. The image is then upscaled, and the GUI stays at full resolution. Two upscalers:
+window size. The image is then upscaled, and the GUI stays at full resolution. Three upscalers:
 
 - **Bicubic** (default): Catmull-Rom, clamped so edges don't ring, then contrast-adaptive
   sharpening. The fastest.
 - **Edge-adaptive (FSR 1)**: a port of AMD FidelityFX Super Resolution 1.0's EASU and RCAS. It
   estimates each edge's direction and filters along it, so edges stay sharp without jaggies, then
   sharpens without halos. A little more GPU time.
+- **Temporal (TAAU)**: the world renders with a sub-pixel offset that changes every frame, and a
+  full-resolution history gathers the samples (reprojected with depth; anything that changed is
+  rejected so it doesn't ghost). Cleaner edges than the others, and it anti-aliases on its own,
+  also at 100% render scale, where it is plain TAA. Shaders off only for now: with a shader pack it
+  uses edge-adaptive.
+
+**Dynamic render scale** lowers the render scale (down to 50%) when real frames are too slow for
+the target frame rate, and raises it again when there is room. It aims for half the target in real
+frames while frame generation is on (frame generation makes up the rest).
+
+## Anti-aliasing
+
+**Quality → Anti-aliasing**: **FXAA** (cheapest) or **SMAA** (the reference implementation by
+Jorge Jimenez et al.; cleaner edges, sharper textures), with a quality setting from Low to Ultra.
+It runs on the world before the GUI, so the HUD stays sharp. Not needed with the temporal upscaler.
+Most shader packs have their own anti-aliasing.
 
 ## Settings
 
-In game: **Mod Menu → VFrameGen** (needs Cloth Config), or `config/vframegen.properties`.
+In game: **Video Settings → VFrameGen** (with Sodium) for the main options, **Mod Menu →
+VFrameGen** (needs Cloth Config) for all of them, or `config/vframegen.properties`.
 Toggle key: **F9** (rebind under Controls → VFrameGen).
 
-- **General**: on/off, mode, multiplier (2–6x), adaptive frame generation with a target frame
-  rate, depth mode, pacing, present thread (Vulkan,
-  needs a restart), auto frame cap, display refresh rate.
-- **Upscaling**: render scale, upscaler (bicubic or edge-adaptive) and sharpening.
+- **General**: preset, on/off, mode, multiplier (2–6x), adaptive frame generation and the target
+  frame rate, depth mode, pacing, present thread (Vulkan, needs a restart), auto frame cap,
+  display refresh rate.
+- **Upscaling**: dynamic render scale, render scale, upscaler (bicubic, edge-adaptive or temporal)
+  and sharpening.
 - **Limits**: when not to generate frames (camera jumps, fast turns, very slow real frames).
-- **Quality**: sharpening of generated frames, GUI detection threshold.
+- **Quality**: sharpening of generated frames, anti-aliasing and its quality, motion blur, GUI
+  detection threshold.
 - **Debug** (all off by default): a magenta tint on generated frames, F8 captures (images and
   validation frames go to `vframegen-debug/`), a rolling log of the last ~10 s of presented frames,
   and stats, pacing and stall lines in the game log.
@@ -148,8 +188,12 @@ frames.
   building) look worse with frame generation on: smooth motion, a pause, then a jump. They also
   happen with it off. See [Tips](#tips).
 - Disocclusions (what was hidden behind something) are filled from neighbouring pixels, so fast
-  sideways motion can smear edges a little. Things that move on their own (waving leaves, water,
-  mobs) are only as smooth as the real frames.
+  sideways motion can smear edges a little. Things that move on their own without moving as a
+  whole (waving leaves, water, swinging limbs) are only as smooth as the real frames.
+- Entity motion only works in interpolated mode (low-latency mode has no next frame to take it
+  from).
+- The temporal upscaler is for shaders off (it uses edge-adaptive with a shader pack), and fast
+  mobs can leave a faint trail with it.
 - Transparent HUD parts show the world behind them as of the nearer real frame.
 - Intel and desktop AMD GPUs have not been tested yet, and Windows only on one older PC.
 
@@ -183,4 +227,6 @@ Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 ## License
 
 [MIT](LICENSE). The edge-adaptive upscaler is based on AMD FidelityFX Super Resolution 1.0
-(MIT, © Advanced Micro Devices, Inc.); its notice is in the shader files.
+(MIT, © Advanced Micro Devices, Inc.); its notice is in the shader files. SMAA is the reference
+implementation by Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro and Diego
+Gutierrez (MIT); its notice is in `shaders/include/smaa.glsl`.
