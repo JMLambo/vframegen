@@ -1201,9 +1201,13 @@ public final class FrameGenerator {
      */
     private int putEntities(Std140Builder ub, FrameSlot src, FrameSlot other, float f, Matrix4f dstViewProjRot, Vector3d dstPos) {
         int n = 0;
-        Matrix4f srcViewProj = new Matrix4f(src.proj).mul(src.viewRot);
-        Matrix4f dstViewProj = new Matrix4f(dstViewProjRot).translate(
-                (float) (src.pos.x - dstPos.x), (float) (src.pos.y - dstPos.y), (float) (src.pos.z - dstPos.z));
+        Matrix4f srcViewProj = entSrcViewProj;
+        Matrix4f dstViewProj = entDstViewProj;
+        if (ub != null) {
+            srcViewProj.set(src.proj).mul(src.viewRot);
+            dstViewProj.set(dstViewProjRot).translate(
+                    (float) (src.pos.x - dstPos.x), (float) (src.pos.y - dstPos.y), (float) (src.pos.z - dstPos.z));
+        }
         if (other != null) {
             for (int i = 0; i < src.entityCount && n < FrameSlot.MAX_ENTITIES; i++) {
                 int j = indexOf(other, src.entityIds[i]);
@@ -1222,8 +1226,8 @@ public final class FrameGenerator {
                     float x1 = ox + bx[i * 6 + 3], y1 = oy + bx[i * 6 + 4], z1 = oz + bx[i * 6 + 5];
                     // Screen motion of the box centre, and the moved box's rectangle in the output.
                     float cx = (x0 + x1) * 0.5f, cy = (y0 + y1) * 0.5f, cz = (z0 + z1) * 0.5f;
-                    org.joml.Vector4f cs = srcViewProj.transform(new org.joml.Vector4f(cx, cy, cz, 1f));
-                    org.joml.Vector4f cd = dstViewProj.transform(new org.joml.Vector4f(cx + mx, cy + my, cz + mz, 1f));
+                    org.joml.Vector4f cs = srcViewProj.transform(entCs.set(cx, cy, cz, 1f));
+                    org.joml.Vector4f cd = dstViewProj.transform(entCd.set(cx + mx, cy + my, cz + mz, 1f));
                     float su = 0f, sv = 0f;
                     float rx0 = 2f, ry0 = 2f, rx1 = -1f, ry1 = -1f; // empty unless the whole box is in front
                     if (cs.w > 1.0e-4f && cd.w > 1.0e-4f) {
@@ -1232,7 +1236,7 @@ public final class FrameGenerator {
                         boolean front = true;
                         float ux0 = 2f, uy0 = 2f, ux1 = -1f, uy1 = -1f;
                         for (int k = 0; k < 8 && front; k++) {
-                            org.joml.Vector4f c = dstViewProj.transform(new org.joml.Vector4f(
+                            org.joml.Vector4f c = dstViewProj.transform(entCorner.set(
                                     ((k & 1) == 0 ? x0 : x1) + mx, ((k & 2) == 0 ? y0 : y1) + my, ((k & 4) == 0 ? z0 : z1) + mz, 1f));
                             if (c.w <= 1.0e-4f) {
                                 front = false;
@@ -1266,6 +1270,10 @@ public final class FrameGenerator {
         }
         return n;
     }
+
+    // Scratch for putEntities (render thread only), so it allocates nothing per frame.
+    private final Matrix4f entSrcViewProj = new Matrix4f(), entDstViewProj = new Matrix4f();
+    private final org.joml.Vector4f entCs = new org.joml.Vector4f(), entCd = new org.joml.Vector4f(), entCorner = new org.joml.Vector4f();
 
     private static int indexOf(FrameSlot s, int id) {
         for (int i = 0; i < s.entityCount; i++) if (s.entityIds[i] == id) return i;

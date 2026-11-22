@@ -237,7 +237,7 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
             if (!isSky(d)) {
                 float ndcZ = Params2.y > 0.5 ? d : d * 2.0 - 1.0;
                 vec4 p = invViewProj * vec4(uvSrc * 2.0 - 1.0, ndcZ, 1.0);
-                w.entity = abs(p.w) > 1.0e-12 && dot(entityMotion(p.xyz / p.w, fromB), vec3(1.0)) != 0.0;
+                w.entity = abs(p.w) > 1.0e-12 && any(notEqual(entityMotion(p.xyz / p.w, fromB), vec3(0.0)));
             }
         }
         w.near = haveHit ? bestHitNear : bestMissNear;
