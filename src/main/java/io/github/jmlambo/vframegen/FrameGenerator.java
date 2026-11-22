@@ -130,6 +130,8 @@ public final class FrameGenerator {
     private boolean gpuTimersUnsupported;
     private long gpuPassNs;
     private int gpuPassCount;
+    // Smoothed GPU time of one generated frame (0: not measured yet), for adaptive mode's budget.
+    private double gpuPassAvgNs;
     private final Map<String, RenderPipeline> pipelines = new HashMap<>();
     private boolean broken;
 
@@ -886,6 +888,19 @@ public final class FrameGenerator {
     private static final long DROP_CEILING_LOWER_NS = 250_000_000L;
     private static final long DROP_CEILING_RAISE_NS = 500_000_000L;
 
+    // Share of the time between real frames that generated frames may take on the GPU. The GPU
+    // that draws them also draws the real frames, so where one costs as much as a few ms (a laptop
+    // iGPU at 1080p), asking for more and more of them to reach the target only slowed the real
+    // frames, which asked for even more: 60 real fps fell to 15. With this share the time between
+    // real frames settles at most 1 / (1 - share) of what it was (real fps keeps 75% or more).
+    private static final double GPU_BUDGET_SHARE = 0.25;
+
+    /** The most frames per real frame whose generated frames fit in that GPU budget. */
+    private double gpuBudgetCeiling() {
+        if (gpuPassAvgNs <= 0 || adaptiveIntervalNs <= 0) return FrameGenConfig.ADAPTIVE_MAX_MULTIPLIER;
+        return Math.clamp(1.0 + GPU_BUDGET_SHARE * adaptiveIntervalNs / gpuPassAvgNs, 2.0, FrameGenConfig.ADAPTIVE_MAX_MULTIPLIER);
+    }
+
     private double adaptiveCeiling() {
         long now = System.nanoTime();
         if (PresentThread.takeDropped() > 0) {
@@ -912,6 +927,7 @@ public final class FrameGenerator {
                     : adaptiveIntervalNs + (intervalNs - adaptiveIntervalNs) * 0.1;
         }
         if (adaptiveIntervalNs <= 0) return adaptiveFrames;
+        most = Math.min(most, gpuBudgetCeiling());
         double ideal = Math.clamp(cfg.targetFps * adaptiveIntervalNs / 1e9, 1.0, most);
         adaptiveCarry += ideal;
         adaptiveFrames = (int) Math.clamp(Math.floor(adaptiveCarry + 1.0e-6), 1, (int) Math.ceil(most));
@@ -923,7 +939,7 @@ public final class FrameGenerator {
     public double adaptiveMultiplier() {
         FrameGenConfig cfg = VFrameGen.config();
         if (!cfg.adaptive || adaptiveIntervalNs <= 0) return 0;
-        return Math.clamp(cfg.targetFps * adaptiveIntervalNs / 1e9, 1.0, dropCeiling);
+        return Math.clamp(cfg.targetFps * adaptiveIntervalNs / 1e9, 1.0, Math.min(dropCeiling, gpuBudgetCeiling()));
     }
 
     /** True while a generated frame is being submitted (see VulkanTransientMemoryMixin). */
@@ -1491,8 +1507,10 @@ public final class FrameGenerator {
             if (t0.isEmpty() || t1.isEmpty()) return;
             gpuTimers.poll();
             pool.close();
-            gpuPassNs += Math.max(0, t1.getAsLong() - t0.getAsLong());
+            long pass = Math.max(0, t1.getAsLong() - t0.getAsLong());
+            gpuPassNs += pass;
             gpuPassCount++;
+            gpuPassAvgNs = gpuPassAvgNs <= 0 ? pass : gpuPassAvgNs + (pass - gpuPassAvgNs) * 0.05;
         }
     }
 
