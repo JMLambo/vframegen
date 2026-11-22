@@ -276,6 +276,9 @@ public final class FrameGenerator {
         held = null;
         building = null;
         genPlanned = false;
+        // The auto cap's samples carry over between seconds; not across a pause or settings change.
+        fitCount = missCount = roomySeconds = badSeconds = 0;
+        minSlackMs = Double.MAX_VALUE;
     }
 
 
