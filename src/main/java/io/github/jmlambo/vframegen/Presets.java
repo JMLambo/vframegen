@@ -21,7 +21,7 @@ public final class Presets {
                 c.adaptive = true;
                 c.dynamicRenderScale = true;
                 c.renderScale = 1.0;
-                c.upscaler = FrameGenConfig.Upscaler.EDGE_ADAPTIVE;
+                c.upscaler = FrameGenConfig.Upscaler.BICUBIC; // the cheapest
                 c.antiAliasing = FrameGenConfig.AntiAliasingMode.FXAA;
                 c.antiAliasingQuality = 2;
             }
