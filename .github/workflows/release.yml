@@ -118,7 +118,7 @@ jobs:
 
           metadata=$(jq -n \
             --arg changelog "${changelog}" --arg name "${name}" --arg type "${type}" --argjson ids "${ids}" \
-            --argjson optional '["sodium", "irisshaders", "distant-horizons", "modmenu", "cloth-config", "controlify"]' \
+            --argjson optional '["sodium", "irisshaders", "distant-horizons", "modmenu", "cloth-config", "controlify", "reflex-antilag"]' \
             '{changelog: $changelog, changelogType: "markdown", displayName: $name, releaseType: $type,
               gameVersions: $ids,
               relations: {projects: ([{slug: "fabric-api", type: "requiredDependency"}]
