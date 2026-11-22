@@ -49,6 +49,7 @@ jobs:
     concurrency:
       group: virustotal
       cancel-in-progress: false
+      queue: max # every waiting scan stays queued (default: only the newest one)
     steps:
       - name: Check out
         uses: actions/checkout@v7
