@@ -38,14 +38,17 @@ jobs:
           path: build/libs/*.jar
           if-no-files-found: error
 
-  # Scans the built jar with VirusTotal's engines (needs the VIRUSTOTAL_API_KEY secret; skipped
-  # without it, and on pull requests from forks, which can't read secrets). Fails when two or more
-  # engines flag it as malicious; a single detection is usually a false positive on new jars, so
-  # that only warns. The report link is in the job summary.
+
+  # VirusTotal scan of the jar (.github/scripts/virustotal.sh), on pull requests only: main only
+  # changes through them, and release jars are scanned by the Release workflow.
   virustotal:
+    if: github.event_name == 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
       - name: Download the mod jar
         uses: actions/download-artifact@v8
         with:
@@ -55,36 +58,4 @@ jobs:
       - name: Scan with VirusTotal
         env:
           VT_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
-        run: |
-          if [ -z "${VT_KEY}" ]; then
-            echo "::notice::VIRUSTOTAL_API_KEY is not available; skipping the VirusTotal scan"
-            exit 0
-          fi
-          jar=$(ls jars/*.jar | grep -v -- '-sources\.jar$' | head -n1)
-          api=https://www.virustotal.com/api/v3
-          id=$(curl -sfS -H "x-apikey: ${VT_KEY}" -F "file=@${jar}" "${api}/files" | jq -r '.data.id')
-          sha=$(sha256sum "${jar}" | cut -d' ' -f1)
-          # The free API allows 4 requests a minute: poll every 20 seconds, up to 10 minutes.
-          for i in $(seq 30); do
-            sleep 20
-            analysis=$(curl -sfS -H "x-apikey: ${VT_KEY}" "${api}/analyses/${id}" || true)
-            [ "$(echo "${analysis}" | jq -r '.data.attributes.status // empty')" = completed ] && break
-          done
-          stats=$(echo "${analysis}" | jq -c '.data.attributes.stats // {}')
-          malicious=$(echo "${stats}" | jq -r '.malicious // 0')
-          suspicious=$(echo "${stats}" | jq -r '.suspicious // 0')
-          link="https://www.virustotal.com/gui/file/${sha}"
-          {
-            echo "### VirusTotal: $(basename "${jar}")"
-            echo "Malicious: ${malicious}, suspicious: ${suspicious} ([report](${link}))"
-          } >> "${GITHUB_STEP_SUMMARY}"
-          if [ "$(echo "${analysis}" | jq -r '.data.attributes.status // empty')" != completed ]; then
-            echo "::warning::VirusTotal analysis did not finish in time: ${link}"
-          elif [ "${malicious}" -ge 2 ]; then
-            echo "::error::${malicious} VirusTotal engines flag the jar as malicious: ${link}"
-            exit 1
-          elif [ "${malicious}" -ge 1 ] || [ "${suspicious}" -ge 1 ]; then
-            echo "::warning::VirusTotal: ${malicious} malicious, ${suspicious} suspicious (likely false positives): ${link}"
-          else
-            echo "VirusTotal: clean (${stats}) ${link}"
-          fi
+        run: .github/scripts/virustotal.sh "$(ls jars/*.jar | grep -v -- '-sources\.jar$' | head -n1)"

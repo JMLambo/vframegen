@@ -51,6 +51,12 @@ jobs:
       - name: Build
         run: ./gradlew build --stacktrace
 
+      - name: Scan with VirusTotal
+        if: github.event_name == 'push'
+        env:
+          VT_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
+        run: .github/scripts/virustotal.sh "$(ls build/libs/*.jar | grep -v -- '-sources\.jar$' | head -n1)"
+
       - name: Publish the GitHub Release
         if: github.event_name == 'push'
         env:
