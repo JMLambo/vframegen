@@ -143,6 +143,8 @@ public final class FrameGenerator {
     private boolean frameWorldDepthCaptured;
     /** The depth was taken before water and other translucents were drawn (captureOpaqueDepth). */
     private boolean frameOpaqueDepthCaptured;
+    /** The depth was also taken before entities were drawn (captureTerrainDepth). */
+    private boolean frameTerrainDepthCaptured;
     private boolean frameHandCaptured;
     private boolean frameWorldCaptured;
     private Present present = Present.VANILLA;
@@ -325,6 +327,7 @@ public final class FrameGenerator {
         frameProjCaptured = false;
         frameWorldDepthCaptured = false;
         frameOpaqueDepthCaptured = false;
+        frameTerrainDepthCaptured = false;
         frameHandCaptured = false;
         frameWorldCaptured = false;
         building = null;
@@ -1166,7 +1169,7 @@ public final class FrameGenerator {
             // Moving entities: only between two real frames (interpolated), where both positions are known.
             int countA = b != null ? putEntities(null, a, b, t, dstViewProjRot, dstPos) : 0;
             int countB = b != null ? putEntities(null, b, a, 1f - t, dstViewProjRot, dstPos) : 0;
-            ub.putVec4(countA, countB, 0f, 0f);
+            ub.putVec4(countA, countB, a.hasTerrainDepth ? 1f : 0f, (b != null ? b : a).hasTerrainDepth ? 1f : 0f);
             putEntities(ub, a, b, t, dstViewProjRot, dstPos);
             putEntities(ub, b != null ? b : a, b != null ? a : null, 1f - t, dstViewProjRot, dstPos);
             ByteBuffer data = ub.get();
@@ -1476,6 +1479,7 @@ public final class FrameGenerator {
         pass.setUniform("Mask" + id, s.maskView, nearest);
         pass.setUniform("NoHand" + id, s.noHandView, linear);
         pass.setUniform("Final" + id, s.finalView, nearest);
+        pass.setUniform("Terrain" + id, s.terrainDepthView, nearest);
     }
 
     /** Depth-buffer value at distance d in front of the camera, for projection proj. */
@@ -1502,7 +1506,7 @@ public final class FrameGenerator {
         return pipelines.computeIfAbsent(key, k -> {
             BindGroupLayout.Builder layout = BindGroupLayout.builder();
             for (String id : interpolate ? new String[]{"A", "B"} : new String[]{"A"}) {
-                for (String tex : new String[]{"World", "Depth", "Mask", "NoHand", "Final"}) {
+                for (String tex : new String[]{"World", "Depth", "Mask", "NoHand", "Final", "Terrain"}) {
                     layout.withUniform(tex + id, UniformType.COMBINED_IMAGE_SAMPLER);
                 }
             }
@@ -1529,6 +1533,16 @@ public final class FrameGenerator {
         frameProjCaptured = true;
     }
 
+    /**
+     * Whether the level renderer should draw entities in a pass of their own, so the depth before
+     * them can be kept (captureTerrainDepth). Also with a shader pack (Iris draws into the main
+     * depth buffer too; IrisPipelineMixin draws them while its opaque targets are still in use).
+     * Only interpolation moves entities.
+     */
+    public boolean wantsTerrainDepth() {
+        return active() && interpolated();
+    }
+
     /** Whether the level renderer should keep the depth from before translucents (see captureOpaqueDepth). */
     public boolean wantsOpaqueDepth() {
         return active() && !Compat.irisShadersActive();
@@ -1545,6 +1559,17 @@ public final class FrameGenerator {
         FrameSlot c = prepare(gr);
         if (c == null) return;
         frameOpaqueDepthCaptured = copy(gr.mainRenderTarget().getDepthTexture(), c.depth);
+    }
+
+    /**
+     * After the opaque terrain, before entities and other solid features are drawn. Pixels whose
+     * depth differs from this in the final depth were drawn by an entity (or a block entity): only
+     * those move with an entity, not the blocks around it inside its padded box.
+     */
+    public void captureTerrainDepth(GameRenderer gr) {
+        FrameSlot c = prepare(gr);
+        if (c == null) return;
+        frameTerrainDepthCaptured = copy(gr.mainRenderTarget().getDepthTexture(), c.terrainDepth);
     }
 
     /** Right before the held item is drawn: the depth buffer still has the whole world in it. */
@@ -1605,6 +1630,7 @@ public final class FrameGenerator {
         }
         c.extractNs = frameExtractNs != 0 ? frameExtractNs : System.nanoTime();
         c.hasHand = frameHandCaptured;
+        c.hasTerrainDepth = frameTerrainDepthCaptured;
         c.level = Minecraft.getInstance().level;
         c.hasFinal = false;
         c.valid = true;

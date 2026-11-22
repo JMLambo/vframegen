@@ -21,12 +21,14 @@ uniform sampler2D DepthA;      // world depth, before the held item
 uniform sampler2D MaskA;       // held item mask: r hand buffer, g near-depth lock (grown)
 uniform sampler2D NoHandA;     // world before the held item (vanilla only)
 uniform sampler2D FinalA;      // what was shown: world + GUI
+uniform sampler2D TerrainA;    // depth before entities were drawn (EntCount.z)
 #ifdef INTERPOLATE
 uniform sampler2D WorldB;
 uniform sampler2D DepthB;
 uniform sampler2D MaskB;
 uniform sampler2D NoHandB;
 uniform sampler2D FinalB;
+uniform sampler2D TerrainB;
 #endif
 
 layout(std140) uniform FrameGen {
@@ -42,7 +44,7 @@ layout(std140) uniform FrameGen {
     vec4 AFlags;   // x: hand buffer valid, y: near-depth hand lock, z: its depth threshold, w: use depth
     vec4 BFlags;
     vec4 Mix;      // x: position between A (0) and B (1)
-    vec4 EntCount; // x: entities in A, y: in B
+    vec4 EntCount; // x: entities in A, y: in B, z/w: TerrainA/B valid
     // Per source, 32 x (box min (w: screen motion x), box max (w: y), motion to the output frame,
     // screen rectangle in the output), relative to its camera.
     vec4 EntA[128];
@@ -99,6 +101,19 @@ vec3 entityMotion(vec3 p, bool fromB) {
     return vec3(0.0);
 }
 
+// Whether an entity drew this source pixel: the depth there changed when entities were drawn
+// (blocks next to an entity, inside its padded box, did not). Without that depth: the box only.
+bool drawnByEntity(vec2 uv, float d, bool fromB) {
+#ifdef INTERPOLATE
+    if (fromB) {
+        if (EntCount.w < 0.5) return true;
+        return abs(texture(TerrainB, uv).r - d) > 1.0e-7;
+    }
+#endif
+    if (EntCount.z < 0.5) return true;
+    return abs(texture(TerrainA, uv).r - d) > 1.0e-7;
+}
+
 // Where a source pixel lands in the output. z is 0 when it lands behind the output camera (or the
 // depth unprojects to nothing): never a match.
 vec3 landingSpot(vec2 uvSrc, float depth, mat4 invViewProj, mat4 dstViewProj, bool fromB) {
@@ -106,7 +121,7 @@ vec3 landingSpot(vec2 uvSrc, float depth, mat4 invViewProj, mat4 dstViewProj, bo
     vec4 p = invViewProj * vec4(uvSrc * 2.0 - 1.0, ndcZ, 1.0);
     if (abs(p.w) < 1.0e-12) return vec3(-1.0, -1.0, 0.0);
     vec3 pos = p.xyz / p.w;
-    pos += entityMotion(pos, fromB);
+    if (drawnByEntity(uvSrc, depth, fromB)) pos += entityMotion(pos, fromB);
     vec4 clip = dstViewProj * vec4(pos, 1.0);
     if (clip.w <= 1.0e-6) return vec3(-1.0, -1.0, 0.0);
     return vec3((clip.xy / clip.w) * 0.5 + 0.5, 1.0);
@@ -237,7 +252,7 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
             if (!isSky(d)) {
                 float ndcZ = Params2.y > 0.5 ? d : d * 2.0 - 1.0;
                 vec4 p = invViewProj * vec4(uvSrc * 2.0 - 1.0, ndcZ, 1.0);
-                w.entity = abs(p.w) > 1.0e-12 && any(notEqual(entityMotion(p.xyz / p.w, fromB), vec3(0.0)));
+                w.entity = abs(p.w) > 1.0e-12 && drawnByEntity(clamp(uvSrc, 0.0, 1.0), d, fromB) && any(notEqual(entityMotion(p.xyz / p.w, fromB), vec3(0.0)));
             }
         }
         w.near = haveHit ? bestHitNear : bestMissNear;
