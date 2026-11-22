@@ -55,8 +55,8 @@ layout(std140) uniform FrameGen {
     vec4 EntB[128];
     mat4 AToB;      // position relative to A's camera -> B clip (optical flow)
     mat4 BToA;      // position relative to B's camera -> A clip
-    vec4 FlowParams; // x: optical flow on, y: trusted forward/backward disagreement (pixels^2), zw: snorm -> uv
-    vec4 FlowLimits; // x: smallest residual used (pixels), y: largest
+    vec4 FlowParams; // x: optical flow on, y: trusted forward/backward disagreement (pixels^2), zw: texel value -> uv
+    vec4 FlowLimits; // x: smallest residual used (pixels), y: largest, zw: measured image size (pixels)
 };
 
 layout(location = 0) in vec2 texCoord;
@@ -138,8 +138,8 @@ vec2 flowResidual(vec2 uvSrc, vec3 pos, bool byEntity, bool fromB) {
     // Off the image the reverse lookup would read an edge texel instead: not verifiable.
     if (offscreen(uvSrc + f)) return vec2(0.0);
     vec2 back = (fromB ? texture(FlowA, uvSrc + f).rg : texture(FlowB, uvSrc + f).rg) * FlowParams.zw;
-    // Disagreement in pixels of the measured image (FlowParams.zw is snorm -> uv per axis).
-    vec2 errPx = (f + back) / FlowParams.zw * (32767.0 / 32.0);
+    // Disagreement in pixels of the measured image (FlowLimits.zw: its size).
+    vec2 errPx = (f + back) * FlowLimits.zw;
     if (dot(errPx, errPx) > FlowParams.y) return vec2(0.0);
     // Entity root motion to the output frame covers a fraction of the step; over the whole step:
     float frac = fromB ? 1.0 - Mix.x : Mix.x;

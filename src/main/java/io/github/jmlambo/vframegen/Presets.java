@@ -4,7 +4,7 @@ package io.github.jmlambo.vframegen;
  * One-click presets: set frame generation, render scale, upscaling and anti-aliasing together.
  * The preset shown is the one the current settings match (CUSTOM when none does), so changing any
  * of these settings by hand turns it to Custom. The target frame rate and motion blur are left
- * alone (they depend on the display and on taste).
+ * alone (they depend on the display and on taste); Quality also turns on optical flow.
  */
 public final class Presets {
     public enum Preset { CUSTOM, LOW_END, BALANCED, QUALITY }
@@ -43,6 +43,9 @@ public final class Presets {
                 c.upscaler = FrameGenConfig.Upscaler.TEMPORAL; // temporal anti-aliasing at 100%
                 c.antiAliasing = FrameGenConfig.AntiAliasingMode.OFF; // temporal anti-aliases
                 c.antiAliasingQuality = 3;
+                // Generated frames also follow motion depth can't see. Only used where the GPU
+                // supports it; the other presets leave the setting as it is.
+                c.opticalFlow = true;
             }
             case CUSTOM -> {
             }
@@ -69,6 +72,7 @@ public final class Presets {
         n.upscaler = c.upscaler;
         n.antiAliasing = c.antiAliasing;
         n.antiAliasingQuality = c.antiAliasingQuality;
+        n.opticalFlow = c.opticalFlow;
         return n;
     }
 
@@ -76,6 +80,7 @@ public final class Presets {
         return a.enabled == b.enabled && a.adaptive == b.adaptive && a.dynamicRenderScale == b.dynamicRenderScale
                 // The render scale setting is not used while dynamic scale is on.
                 && (a.dynamicRenderScale || Math.abs(a.renderScale - b.renderScale) < 1e-6) && a.upscaler == b.upscaler
-                && a.antiAliasing == b.antiAliasing && a.antiAliasingQuality == b.antiAliasingQuality;
+                && a.antiAliasing == b.antiAliasing && a.antiAliasingQuality == b.antiAliasingQuality
+                && a.opticalFlow == b.opticalFlow;
     }
 }

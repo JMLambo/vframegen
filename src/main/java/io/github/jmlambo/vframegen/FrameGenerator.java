@@ -1031,7 +1031,7 @@ public final class FrameGenerator {
 
     /** F8: the optical flow of the captured pair (A to B), the one its generated frames use, if measured. */
     private void saveCapturedFlow() {
-        OpticalFlow.Pair pair = OpticalFlow.forPair(shown.noHand, held.noHand);
+        OpticalFlow.Pair pair = flowFor(shown, held);
         if (pair != null) DebugCapture.save(pair.forward, "9-optical-flow");
     }
 
@@ -1241,15 +1241,16 @@ public final class FrameGenerator {
             ub.putVec4(countA, countB, a.hasTerrainDepth ? 1f : 0f, (b != null ? b : a).hasTerrainDepth ? 1f : 0f);
             putEntities(ub, a, b, t, dstViewProjRot, dstPos);
             putEntities(ub, b != null ? b : a, b != null ? a : null, 1f - t, dstViewProjRot, dstPos);
-            flow = b != null && VFrameGen.config().opticalFlow ? OpticalFlow.forPair(a.noHand, b.noHand) : null;
+            flow = b != null && VFrameGen.config().opticalFlow ? flowFor(a, b) : null;
             ub.putMat4f(otherViewProj(a, bb)).putMat4f(otherViewProj(bb, a));
-            float fw = OpticalFlow.SNORM_TO_PIXELS / a.noHand.getWidth(0), fh = OpticalFlow.SNORM_TO_PIXELS / a.noHand.getHeight(0);
+            // A flow texel times (fw, fh) is a uv offset.
+            float fw = flow != null ? flow.pixelsPerUnit / flow.width : 0f, fh = flow != null ? flow.pixelsPerUnit / flow.height : 0f;
             // Forward and backward flow may disagree by a pixel (of the measured image) and still be trusted.
             ub.putVec4(flow != null ? 1f : 0f, 1f, fw, fh);
             // Measured with the camera turning and nothing else moving: below 2.5 pixels (or with the two
             // directions more than a pixel apart) the flow moved 1-7% of the screen that depth already
             // had right; above it, 0.05%, while burning mobs' fire was still followed.
-            ub.putVec4(2.5f, 48f, 0f, 0f);
+            ub.putVec4(2.5f, 48f, flow != null ? flow.width : 0f, flow != null ? flow.height : 0f);
             ByteBuffer data = ub.get();
             encoder.writeToBuffer(ubo.slice(), data);
         }
@@ -1596,6 +1597,16 @@ public final class FrameGenerator {
     }
 
     private OpticalFlow.Pair flow;
+
+    /** Shader optical flow where there is no optical flow hardware. */
+    private static boolean useShaderFlow() {
+        return !OpticalFlow.available();
+    }
+
+    /** The optical flow measured between real frames a and b, from whichever path measures it, or null. */
+    private static OpticalFlow.Pair flowFor(FrameSlot a, FrameSlot b) {
+        return useShaderFlow() ? ShaderFlow.forPair(a.noHand, b.noHand) : OpticalFlow.forPair(a.noHand, b.noHand);
+    }
     private RenderPipeline pipeline(GpuFormat format, boolean interpolate) {
         String key = format.name() + (interpolate ? "_interpolate" : "");
         return pipelines.computeIfAbsent(key, k -> {
@@ -1735,7 +1746,8 @@ public final class FrameGenerator {
         c.valid = true;
         // Interpolated mode only: the flow is between two real frames, and only that mode has both.
         if (interpolated() && (VFrameGen.config().opticalFlow || VFrameGen.config().debugOpticalFlow)) {
-            OpticalFlow.measure(c.noHand);
+            if (useShaderFlow()) ShaderFlow.measure(c.noHand);
+            else OpticalFlow.measure(c.noHand);
         }
         buildMask(c);
         // With a shader pack the depth buffer has the water surface in it (see captureOpaqueDepth);

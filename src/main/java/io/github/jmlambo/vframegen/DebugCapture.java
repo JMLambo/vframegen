@@ -115,7 +115,9 @@ public final class DebugCapture {
         boolean half = format == GpuFormat.RGBA16_FLOAT;
         // Optical flow (RG16 snorm holding pixels * 32): shown as colour, grey = still, red/green = x/y motion.
         boolean flow = format == GpuFormat.RG16_SNORM;
-        if (format != GpuFormat.RGBA8_UNORM && !half && !flow) {
+        // Shader optical flow (RG16 float, pixels): shown the same way.
+        boolean flowFloat = format == GpuFormat.RG16_FLOAT;
+        if (format != GpuFormat.RGBA8_UNORM && !half && !flow && !flowFloat) {
             VFrameGen.LOGGER.warn("Cannot save {}: format {} is not RGBA8 or RGBA16F", name, format);
             return;
         }
@@ -132,7 +134,12 @@ public final class DebugCapture {
                 for (int y = 0; y < h; y++) {
                     for (int x = 0; x < w; x++) {
                         int abgr;
-                        if (flow) {
+                        if (flowFloat) {
+                            int o = (y * w + x) * 4;
+                            int r = Math.clamp(128 + Math.round(Float.float16ToFloat(data.getShort(o)) * 4f), 0, 255);
+                            int g = Math.clamp(128 + Math.round(Float.float16ToFloat(data.getShort(o + 2)) * 4f), 0, 255);
+                            abgr = 0xFF000000 | (128 << 16) | (g << 8) | r;
+                        } else if (flow) {
                             int o = (y * w + x) * 4;
                             int r = Math.clamp(128 + data.getShort(o) / 8, 0, 255), g = Math.clamp(128 + data.getShort(o + 2) / 8, 0, 255);
                             abgr = 0xFF000000 | (128 << 16) | (g << 8) | r;

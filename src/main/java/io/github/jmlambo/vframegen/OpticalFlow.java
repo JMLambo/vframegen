@@ -103,6 +103,10 @@ public final class OpticalFlow {
         boolean valid;
         boolean copied;             // copied out of the optical-flow images yet
         long measuredValue;         // timeline value the measurement signals
+        /** A texel value times this is measured-image pixels (S10.5 read as snorm; ShaderFlow writes pixels). */
+        public float pixelsPerUnit = SNORM_TO_PIXELS;
+        /** The measured image's size (pixels). */
+        public int width, height;
     }
 
     // Generated frames of a pair may still be drawn after the next real frame was measured.
@@ -121,6 +125,16 @@ public final class OpticalFlow {
         OpticalFlow.family = family;
         OpticalFlow.index = index;
         OpticalFlow.graphicsFamily = graphicsFamily;
+    }
+
+    /** Whether optical flow can run at all: on the hardware, or else as shaders (ShaderFlow). */
+    public static boolean usable() {
+        return available() || ShaderFlow.available();
+    }
+
+    /** The setting's tooltip (without the ".tooltip" suffix): which kind this GPU uses. */
+    public static String settingTooltipKey() {
+        return available() ? "opticalFlow" : ShaderFlow.available() ? "opticalFlow.shader" : "opticalFlow.unsupported";
     }
 
     /** Whether the GPU has hardware optical flow and it was enabled. */
@@ -308,6 +322,8 @@ public final class OpticalFlow {
             pair.measuredValue = measured;
             pair.copied = false;
             pending = pair;
+            pair.width = w;
+            pair.height = h;
             pair.older = older;
             pair.newer = world;
             pair.valid = older != null;
