@@ -129,6 +129,8 @@ public final class FrameGenConfig {
         Path p = path();
         boolean readFailed = false;
         if (Files.exists(p)) {
+            // An existing config, even one that can't be read, is never replaced by first-run setup.
+            c.firstRunPending = false;
             Properties props = new Properties();
             try (Reader r = Files.newBufferedReader(p)) {
                 props.load(r);
