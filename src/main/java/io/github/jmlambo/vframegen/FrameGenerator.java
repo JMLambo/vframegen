@@ -1733,7 +1733,8 @@ public final class FrameGenerator {
         c.level = Minecraft.getInstance().level;
         c.hasFinal = false;
         c.valid = true;
-        if (VFrameGen.config().debugOpticalFlow || (VFrameGen.config().opticalFlow && interpolated())) {
+        // Interpolated mode only: the flow is between two real frames, and only that mode has both.
+        if (interpolated() && (VFrameGen.config().opticalFlow || VFrameGen.config().debugOpticalFlow)) {
             OpticalFlow.measure(c.noHand);
         }
         buildMask(c);

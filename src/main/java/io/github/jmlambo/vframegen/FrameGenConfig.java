@@ -125,7 +125,8 @@ public final class FrameGenConfig {
             opticalFlow             (beta) NVIDIA RTX, interpolated mode: the GPU's optical flow hardware measures
                                     motion between real frames, so generated frames also follow what depth
                                     alone cannot (limbs, particles, water, animated textures).
-            debugOpticalFlow        measure optical flow even when it is not used; F8 saves it as an image
+            debugOpticalFlow        interpolated mode: measure optical flow even when it is not used; F8 saves
+                                    it as an image
                                     (F8 captures need debugCaptures on).
             debugStatsLog           every 5 s, log frame rates, timings and why frames were skipped.
             debugPacingLog          every second, log how evenly frames reached the screen.

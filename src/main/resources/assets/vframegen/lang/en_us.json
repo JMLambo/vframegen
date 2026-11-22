@@ -97,7 +97,7 @@
   "vframegen.config.debugCaptures": "Debug captures (F8)",
   "vframegen.config.debugCaptures.tooltip": "F8 (or the controller capture button) saves the next frames as images into vframegen-debug in the game folder.",
   "vframegen.config.debugOpticalFlow": "Optical flow capture",
-  "vframegen.config.debugOpticalFlow.tooltip": "Measures optical flow on every real frame even when it isn't used, and F8 saves it as an image.",
+  "vframegen.config.debugOpticalFlow.tooltip": "Interpolated mode: measures optical flow on every real frame even when it isn't used, and F8 saves it as an image (needs Debug captures on).",
   "vframegen.config.debugFrameLog": "Frame log",
   "vframegen.config.debugFrameLog.tooltip": "Keeps a record of the last ~10 seconds of frames sent to the screen (real or generated, time, camera position). F8 saves it. Costs a little memory churn.",
   "vframegen.config.debugStatsLog": "Stats in the log",
