@@ -43,9 +43,10 @@ layout(std140) uniform FrameGen {
     vec4 BFlags;
     vec4 Mix;      // x: position between A (0) and B (1)
     vec4 EntCount; // x: entities in A, y: in B
-    // Per source, 32 x (box min, box max, motion to the output frame), relative to its camera.
-    vec4 EntA[96];
-    vec4 EntB[96];
+    // Per source, 32 x (box min (w: screen motion x), box max (w: y), motion to the output frame,
+    // screen rectangle in the output), relative to its camera.
+    vec4 EntA[128];
+    vec4 EntB[128];
 };
 
 layout(location = 0) in vec2 texCoord;
@@ -88,10 +89,10 @@ vec3 projectDirection(vec2 uvDst, mat4 srcViewProjRot) {
 vec3 entityMotion(vec3 p, bool fromB) {
     int n = int(fromB ? EntCount.y : EntCount.x);
     for (int i = 0; i < n; i++) {
-        vec3 lo = fromB ? EntB[i * 3].xyz : EntA[i * 3].xyz;
-        vec3 hi = fromB ? EntB[i * 3 + 1].xyz : EntA[i * 3 + 1].xyz;
+        vec3 lo = fromB ? EntB[i * 4].xyz : EntA[i * 4].xyz;
+        vec3 hi = fromB ? EntB[i * 4 + 1].xyz : EntA[i * 4 + 1].xyz;
         if (all(greaterThanEqual(p, lo)) && all(lessThanEqual(p, hi))) {
-            return fromB ? EntB[i * 3 + 2].xyz : EntA[i * 3 + 2].xyz;
+            return fromB ? EntB[i * 4 + 2].xyz : EntA[i * 4 + 2].xyz;
         }
     }
     return vec3(0.0);
@@ -185,8 +186,20 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
         vec2 bestMiss = skyBehind ? uvDst : skyUv;
         float bestMissNear = 0.0;
         bool haveMiss = false;
-        for (int chain = skyBehind ? 1 : 0; chain < 2; chain++) {
-            vec2 uv = chain == 0 ? skyUv : uvDst;
+        // Extra starting points: where a moving entity whose output rectangle covers this pixel
+        // came from. Without them, an entity that moved farther than its own width is never found
+        // (both other searches start on the background it left).
+        vec2 seeds[4];
+        int seedCount = 0;
+        int ents = int(fromB ? EntCount.y : EntCount.x);
+        for (int e = 0; e < ents && seedCount < 4; e++) {
+            vec4 rect = fromB ? EntB[e * 4 + 3] : EntA[e * 4 + 3];
+            if (uvDst.x < rect.x || uvDst.y < rect.y || uvDst.x > rect.z || uvDst.y > rect.w) continue;
+            vec2 motion = vec2(fromB ? EntB[e * 4].w : EntA[e * 4].w, fromB ? EntB[e * 4 + 1].w : EntA[e * 4 + 1].w);
+            seeds[seedCount++] = uvDst - motion;
+        }
+        for (int chain = skyBehind ? 1 : 0; chain < 2 + seedCount; chain++) {
+            vec2 uv = chain == 0 ? skyUv : chain == 1 ? uvDst : seeds[chain - 2];
             for (int i = 0; i < 6; i++) {
                 vec2 uvc = clamp(uv, 0.0, 1.0);
                 float d = texture(depthTex, uvc).r;

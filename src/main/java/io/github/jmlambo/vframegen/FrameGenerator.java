@@ -76,7 +76,7 @@ public final class FrameGenerator {
      */
     private static final float LOCKED_DISTANCE = 0.2f;
     // + entity count, and per source FrameSlot.MAX_ENTITIES x (box min, box max, motion).
-    private static final int UBO_SIZE = 7 * 64 + 6 * 16 + 2 * FrameSlot.MAX_ENTITIES * 3 * 16;
+    private static final int UBO_SIZE = 7 * 64 + 6 * 16 + 2 * FrameSlot.MAX_ENTITIES * 4 * 16;
 
     /** What vanilla's blit + present show at the end of this loop. */
     public enum Present { VANILLA, HELD }
@@ -1164,11 +1164,11 @@ public final class FrameGenerator {
             putFlags(ub, bb, irisShaders, useDepth, zeroToOne);
             ub.putVec4(t, 0f, 0f, 0f);
             // Moving entities: only between two real frames (interpolated), where both positions are known.
-            int countA = b != null ? putEntities(null, a, b, t) : 0;
-            int countB = b != null ? putEntities(null, b, a, 1f - t) : 0;
+            int countA = b != null ? putEntities(null, a, b, t, dstViewProjRot, dstPos) : 0;
+            int countB = b != null ? putEntities(null, b, a, 1f - t, dstViewProjRot, dstPos) : 0;
             ub.putVec4(countA, countB, 0f, 0f);
-            putEntities(ub, a, b, t);
-            putEntities(ub, b != null ? b : a, b != null ? a : null, 1f - t);
+            putEntities(ub, a, b, t, dstViewProjRot, dstPos);
+            putEntities(ub, b != null ? b : a, b != null ? a : null, 1f - t, dstViewProjRot, dstPos);
             ByteBuffer data = ub.get();
             encoder.writeToBuffer(ubo.slice(), data);
         }
@@ -1193,9 +1193,17 @@ public final class FrameGenerator {
      * other. Written to ub when it isn't null (always all MAX_ENTITIES entries, unused ones empty).
      * Returns how many there are. Root motion only: works the same for any model or animation mod
      * (EMF/ETF, Fresh Animations), since the model itself is never looked at.
+     *
+     * <p>Per entity: box min (w: its screen motion x, source to output, in uv), box max (w: y),
+     * motion, and its screen rectangle in the output frame. The shader starts an extra search
+     * from (output pixel - screen motion) inside that rectangle: an entity that moved farther than
+     * its own width would otherwise not be found at all.
      */
-    private int putEntities(Std140Builder ub, FrameSlot src, FrameSlot other, float f) {
+    private int putEntities(Std140Builder ub, FrameSlot src, FrameSlot other, float f, Matrix4f dstViewProjRot, Vector3d dstPos) {
         int n = 0;
+        Matrix4f srcViewProj = new Matrix4f(src.proj).mul(src.viewRot);
+        Matrix4f dstViewProj = new Matrix4f(dstViewProjRot).translate(
+                (float) (src.pos.x - dstPos.x), (float) (src.pos.y - dstPos.y), (float) (src.pos.z - dstPos.z));
         if (other != null) {
             for (int i = 0; i < src.entityCount && n < FrameSlot.MAX_ENTITIES; i++) {
                 int j = indexOf(other, src.entityIds[i]);
@@ -1209,16 +1217,51 @@ public final class FrameGenerator {
                     float oy = (float) (src.entityPos[i * 3 + 1] - src.pos.y);
                     float oz = (float) (src.entityPos[i * 3 + 2] - src.pos.z);
                     float[] bx = src.entityBox;
-                    ub.putVec4(ox + bx[i * 6], oy + bx[i * 6 + 1], oz + bx[i * 6 + 2], 0f);
-                    ub.putVec4(ox + bx[i * 6 + 3], oy + bx[i * 6 + 4], oz + bx[i * 6 + 5], 0f);
-                    ub.putVec4((float) dx * f, (float) dy * f, (float) dz * f, 0f);
+                    float mx = (float) dx * f, my = (float) dy * f, mz = (float) dz * f;
+                    float x0 = ox + bx[i * 6], y0 = oy + bx[i * 6 + 1], z0 = oz + bx[i * 6 + 2];
+                    float x1 = ox + bx[i * 6 + 3], y1 = oy + bx[i * 6 + 4], z1 = oz + bx[i * 6 + 5];
+                    // Screen motion of the box centre, and the moved box's rectangle in the output.
+                    float cx = (x0 + x1) * 0.5f, cy = (y0 + y1) * 0.5f, cz = (z0 + z1) * 0.5f;
+                    org.joml.Vector4f cs = srcViewProj.transform(new org.joml.Vector4f(cx, cy, cz, 1f));
+                    org.joml.Vector4f cd = dstViewProj.transform(new org.joml.Vector4f(cx + mx, cy + my, cz + mz, 1f));
+                    float su = 0f, sv = 0f;
+                    float rx0 = 2f, ry0 = 2f, rx1 = -1f, ry1 = -1f; // empty unless the whole box is in front
+                    if (cs.w > 1.0e-4f && cd.w > 1.0e-4f) {
+                        su = (cd.x / cd.w - cs.x / cs.w) * 0.5f;
+                        sv = (cd.y / cd.w - cs.y / cs.w) * 0.5f;
+                        boolean front = true;
+                        float ux0 = 2f, uy0 = 2f, ux1 = -1f, uy1 = -1f;
+                        for (int k = 0; k < 8 && front; k++) {
+                            org.joml.Vector4f c = dstViewProj.transform(new org.joml.Vector4f(
+                                    ((k & 1) == 0 ? x0 : x1) + mx, ((k & 2) == 0 ? y0 : y1) + my, ((k & 4) == 0 ? z0 : z1) + mz, 1f));
+                            if (c.w <= 1.0e-4f) {
+                                front = false;
+                                break;
+                            }
+                            float u = c.x / c.w * 0.5f + 0.5f, v = c.y / c.w * 0.5f + 0.5f;
+                            ux0 = Math.min(ux0, u);
+                            uy0 = Math.min(uy0, v);
+                            ux1 = Math.max(ux1, u);
+                            uy1 = Math.max(uy1, v);
+                        }
+                        if (front) {
+                            rx0 = ux0;
+                            ry0 = uy0;
+                            rx1 = ux1;
+                            ry1 = uy1;
+                        }
+                    }
+                    ub.putVec4(x0, y0, z0, su);
+                    ub.putVec4(x1, y1, z1, sv);
+                    ub.putVec4(mx, my, mz, 0f);
+                    ub.putVec4(rx0, ry0, rx1, ry1);
                 }
                 n++;
             }
         }
         if (ub != null) {
             for (int i = n; i < FrameSlot.MAX_ENTITIES; i++) {
-                ub.putVec4(0f, 0f, 0f, 0f).putVec4(-1f, -1f, -1f, 0f).putVec4(0f, 0f, 0f, 0f);
+                ub.putVec4(0f, 0f, 0f, 0f).putVec4(-1f, -1f, -1f, 0f).putVec4(0f, 0f, 0f, 0f).putVec4(2f, 2f, -1f, -1f);
             }
         }
         return n;
@@ -1229,37 +1272,57 @@ public final class FrameGenerator {
         return -1;
     }
 
+    // Reused every frame: the nearest entities so far, kept sorted by distance.
+    private final net.minecraft.world.entity.Entity[] nearEntities = new net.minecraft.world.entity.Entity[FrameSlot.MAX_ENTITIES];
+    private final double[] nearDist = new double[FrameSlot.MAX_ENTITIES];
+    private final float[] nearTick = new float[FrameSlot.MAX_ENTITIES];
+
     /** The entities near the camera this frame, nearest first (FrameSlot.MAX_ENTITIES at most). */
     private void captureEntities(FrameSlot c, boolean firstPerson) {
         c.entityCount = 0;
         Minecraft mc = Minecraft.getInstance();
-        if (mc.level == null) return;
-        float pt = mc.getDeltaTracker().getGameTimeDeltaPartialTick(false);
-        java.util.List<net.minecraft.world.entity.Entity> found = new java.util.ArrayList<>();
-        java.util.List<Double> dist = new java.util.ArrayList<>();
+        // Only interpolation uses them (low latency has no next frame to take motion from).
+        if (mc.level == null || !interpolated()) return;
+        var ticks = mc.level.tickRateManager();
+        var delta = mc.getDeltaTracker();
         net.minecraft.world.entity.Entity camera = mc.getCameraEntity();
+        int n = 0;
         for (net.minecraft.world.entity.Entity e : mc.level.entitiesForRendering()) {
             if (e == camera && firstPerson) continue;
-            net.minecraft.world.phys.Vec3 p = e.getPosition(pt);
-            double d2 = p.distanceToSqr(c.pos.x, c.pos.y, c.pos.z);
+            // The partial tick its renderer uses (frozen entities stay put during /tick freeze).
+            float pt = delta.getGameTimeDeltaPartialTick(!ticks.isEntityFrozen(e));
+            double x = net.minecraft.util.Mth.lerp(pt, e.xo, e.getX()) - c.pos.x;
+            double y = net.minecraft.util.Mth.lerp(pt, e.yo, e.getY()) - c.pos.y;
+            double z = net.minecraft.util.Mth.lerp(pt, e.zo, e.getZ()) - c.pos.z;
+            double d2 = x * x + y * y + z * z;
             if (d2 > 96.0 * 96.0) continue;
-            found.add(e);
-            dist.add(d2);
+            if (n == FrameSlot.MAX_ENTITIES && d2 >= nearDist[n - 1]) continue;
+            int k = n < FrameSlot.MAX_ENTITIES ? n++ : n - 1;
+            while (k > 0 && nearDist[k - 1] > d2) {
+                nearDist[k] = nearDist[k - 1];
+                nearEntities[k] = nearEntities[k - 1];
+                nearTick[k] = nearTick[k - 1];
+                k--;
+            }
+            nearDist[k] = d2;
+            nearEntities[k] = e;
+            nearTick[k] = pt;
         }
-        Integer[] order = new Integer[found.size()];
-        for (int i = 0; i < order.length; i++) order[i] = i;
-        java.util.Arrays.sort(order, (x, y) -> Double.compare(dist.get(x), dist.get(y)));
-        for (int k = 0; k < order.length && c.entityCount < FrameSlot.MAX_ENTITIES; k++) {
-            net.minecraft.world.entity.Entity e = found.get(order[k]);
-            net.minecraft.world.phys.Vec3 p = e.getPosition(pt);
+        for (int k = 0; k < n; k++) {
+            net.minecraft.world.entity.Entity e = nearEntities[k];
+            nearEntities[k] = null;
+            float pt = nearTick[k];
+            double px = net.minecraft.util.Mth.lerp(pt, e.xo, e.getX());
+            double py = net.minecraft.util.Mth.lerp(pt, e.yo, e.getY());
+            double pz = net.minecraft.util.Mth.lerp(pt, e.zo, e.getZ());
             // The box around the entity's position, padded: models (and model mods such as
             // Fresh Animations) reach past the hitbox.
             net.minecraft.world.phys.AABB box = e.getBoundingBox().move(-e.getX(), -e.getY(), -e.getZ()).inflate(0.35);
             int i = c.entityCount++;
             c.entityIds[i] = e.getId();
-            c.entityPos[i * 3] = p.x;
-            c.entityPos[i * 3 + 1] = p.y;
-            c.entityPos[i * 3 + 2] = p.z;
+            c.entityPos[i * 3] = px;
+            c.entityPos[i * 3 + 1] = py;
+            c.entityPos[i * 3 + 2] = pz;
             c.entityBox[i * 6] = (float) box.minX;
             c.entityBox[i * 6 + 1] = (float) box.minY;
             c.entityBox[i * 6 + 2] = (float) box.minZ;
