@@ -40,9 +40,9 @@ public final class Presets {
                 c.adaptive = true;
                 c.dynamicRenderScale = false;
                 c.renderScale = 1.0;
-                c.upscaler = FrameGenConfig.Upscaler.EDGE_ADAPTIVE;
-                c.antiAliasing = FrameGenConfig.AntiAliasingMode.SMAA;
-                c.antiAliasingQuality = 4;
+                c.upscaler = FrameGenConfig.Upscaler.TEMPORAL; // temporal anti-aliasing at 100%
+                c.antiAliasing = FrameGenConfig.AntiAliasingMode.OFF; // temporal anti-aliases
+                c.antiAliasingQuality = 3;
             }
             case CUSTOM -> {
             }

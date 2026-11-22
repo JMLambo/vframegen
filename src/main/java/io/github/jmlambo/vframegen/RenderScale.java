@@ -80,13 +80,16 @@ public final class RenderScale {
         // failed try logs a "Couldn't preload shader" stack trace.
         if (RenderSystemAccessor.vframegen$getCurrentPipelineCache() == null) return;
         RenderTarget main = gr.mainRenderTarget();
-        if (main.width == windowW && main.height == windowH) return;
+        if (main.width == windowW && main.height == windowH) {
+            resolveNative(gr, main);
+            return;
+        }
         GpuTexture color = main.getColorTexture();
         GpuTexture depth = main.getDepthTexture();
         if (color == null || depth == null) return;
         try {
             ensure(windowW, windowH, color.getFormat(), depth.getFormat());
-            upscale(main.getColorTextureView(), main.width, main.height);
+            upscale(gr, main.getColorTextureView(), main.width, main.height);
             failures = 0;
         } catch (RuntimeException e) {
             // Shaders are not loaded yet during startup and resource reloads: try again later.
@@ -174,7 +177,34 @@ public final class RenderScale {
         tempTex = displayTex = displayDepth = null;
     }
 
-    private static void upscale(GpuTextureView src, int srcW, int srcH) {
+    /** 100% render scale with temporal upscaling: temporal anti-aliasing, in place. */
+    private static void resolveNative(GameRenderer gr, RenderTarget main) {
+        GpuTexture color = main.getColorTexture();
+        if (color == null || main.getColorTextureView() == null) return;
+        GpuTextureView out = TemporalUpscaler.resolve(gr, main.getColorTextureView(), color.getFormat(), main.width, main.height);
+        if (out == null) return;
+        // Sharpened back into the main target, like the upscaled image.
+        CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
+        if (ubo == null) {
+            ubo = RenderSystem.getDevice().createBuffer(() -> "VFrameGen upscale uniforms", GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, UBO_SIZE);
+        }
+        float sharp = (float) Math.max(0.0, Math.min(1.0, VFrameGen.config().upscaleSharpness));
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            ByteBuffer data = Std140Builder.onStack(stack, UBO_SIZE)
+                    .putVec4(1f / main.width, 1f / main.height, main.width, main.height)
+                    .putVec4(1f / main.width, 1f / main.height, sharp, 0f)
+                    .get();
+            encoder.writeToBuffer(ubo.slice(), data);
+        }
+        try (RenderPass pass = encoder.createRenderPass(() -> "VFrameGen sharpen", main.getColorTextureView(), Optional.empty())) {
+            pass.setPipeline(RenderSystem.getCompiledPipeline(pipeline("rcas", color.getFormat())));
+            pass.setUniform("Source", out, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
+            pass.setUniform("Upscale", ubo);
+            pass.draw(3, 1, 0, 0);
+        }
+    }
+
+    private static void upscale(GameRenderer gr, GpuTextureView src, int srcW, int srcH) {
         GpuDevice device = RenderSystem.getDevice();
         CommandEncoder encoder = device.createCommandEncoder();
         float sharp = (float) Math.max(0.0, Math.min(1.0, VFrameGen.config().upscaleSharpness));
@@ -187,7 +217,19 @@ public final class RenderScale {
         }
         GpuSampler linear = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);
         GpuSampler nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
-        boolean edgeAdaptive = VFrameGen.config().upscaler == FrameGenConfig.Upscaler.EDGE_ADAPTIVE;
+        // Temporal: the accumulated history, sharpened like the edge-adaptive upscaler's output.
+        GpuTextureView temporal = TemporalUpscaler.resolve(gr, src, colorFormat, fullW, fullH);
+        if (temporal != null) {
+            try (RenderPass pass = encoder.createRenderPass(() -> "VFrameGen sharpen", displayView, Optional.empty())) {
+                pass.setPipeline(RenderSystem.getCompiledPipeline(pipeline("rcas", colorFormat)));
+                pass.setUniform("Source", temporal, nearest);
+                pass.setUniform("Upscale", ubo);
+                pass.draw(3, 1, 0, 0);
+            }
+            return;
+        }
+        // Temporal falls back to edge-adaptive (shader packs, or a failure).
+        boolean edgeAdaptive = VFrameGen.config().upscaler != FrameGenConfig.Upscaler.BICUBIC;
         try (RenderPass pass = encoder.createRenderPass(() -> "VFrameGen upscale", tempView, Optional.empty())) {
             pass.setPipeline(RenderSystem.getCompiledPipeline(pipeline(edgeAdaptive ? "easu" : "upscale", colorFormat)));
             pass.setUniform("Source", src, edgeAdaptive ? nearest : linear);

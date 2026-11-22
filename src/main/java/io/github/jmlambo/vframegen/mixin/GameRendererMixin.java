@@ -27,13 +27,25 @@ public abstract class GameRendererMixin {
     @ModifyArg(method = "renderLevel", require = 0, at = @At(value = "INVOKE",
             target = "Lnet/minecraft/client/renderer/ProjectionMatrixBuffer;getBuffer(Lorg/joml/Matrix4f;)Lcom/mojang/renderpearl/api/buffers/GpuBufferSlice;"))
     private Matrix4f vframegen$captureProjection(Matrix4f projection) {
-        FrameGenerator.INSTANCE.captureProjection(projection);
+        // Temporal upscaling shifts it by a sub-pixel jitter; generated frames want it without.
+        FrameGenerator.INSTANCE.captureProjection(io.github.jmlambo.vframegen.TemporalUpscaler.captureProjection(projection));
         return projection;
+    }
+
+    @Inject(method = "renderLevel", at = @At("HEAD"), require = 0)
+    private void vframegen$levelStart(CallbackInfo ci) {
+        io.github.jmlambo.vframegen.TemporalUpscaler.beginLevel((GameRenderer) (Object) this);
+    }
+
+    @Inject(method = "renderLevel", at = @At("RETURN"), require = 0)
+    private void vframegen$levelEnd(CallbackInfo ci) {
+        io.github.jmlambo.vframegen.TemporalUpscaler.endLevel();
     }
 
     @Inject(method = "render3dHud", at = @At("HEAD"), require = 0)
     private void vframegen$beforeHud3d(CallbackInfo ci) {
         FrameGenerator.INSTANCE.captureWorldDepth((GameRenderer) (Object) this);
+        io.github.jmlambo.vframegen.TemporalUpscaler.captureDepth((GameRenderer) (Object) this);
         FrameGenerator.INSTANCE.crosshairFrameStart();
     }
 
@@ -55,6 +67,7 @@ public abstract class GameRendererMixin {
     private void vframegen$afterHand(CameraRenderState camera, PlayerRenderState player, OptionsRenderState options,
                                      boolean useHudTarget, CallbackInfo ci) {
         FrameGenerator.INSTANCE.captureHandDepth((GameRenderer) (Object) this, useHudTarget);
+        io.github.jmlambo.vframegen.TemporalUpscaler.captureHand((GameRenderer) (Object) this, useHudTarget);
     }
 
     @Inject(method = "render", at = @At(value = "INVOKE", shift = At.Shift.AFTER,
