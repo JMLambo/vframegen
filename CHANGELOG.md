@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.0-beta.4
+
 - Shader optical flow ignores blocks with almost no texture (sky, fog, plain walls), where its matches were noise.
 - Optical flow on every GPU (experimental where there is no optical flow hardware: AMD, Intel, or
   NVIDIA on OpenGL). It is measured with shaders, as a coarse-to-fine block search in the spirit of
