@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- README: on integrated graphics, use only upscaling and anti-aliasing (frame generation costs
+  almost as much as a real frame there).
+
 - Adaptive mode keeps generated frames within a share of the GPU's time. On GPUs where a generated
   frame is expensive (a laptop iGPU at 1080p), asking for more of them to reach the target slowed
   the real frames, which then asked for even more: real fps could fall from 60 to 15.

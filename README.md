@@ -24,6 +24,12 @@ pacing.
 > (see [Tested with](#tested-with)). Expect rough edges on other hardware and mod combinations, and
 > please [report them](https://github.com/JMLambo/vframegen/issues/new/choose).
 
+> **Integrated graphics:** recommended to use only **upscaling and anti-aliasing** (render scale
+> below 100%, an upscaler, and FXAA or SMAA) when playing on integrated graphics, with frame
+> generation off. (If your PC doesn't have a dedicated graphics card, this applies to you.) There,
+> a generated frame costs almost as much as a real one, so frame generation lowers your real frame
+> rate more than it adds.
+
 ## Installing
 
 1. Install [Fabric Loader](https://fabricmc.net/use/) for Minecraft 26.3 and
@@ -53,8 +59,10 @@ Requires Java 25, which Minecraft 26.3 already uses.
 | Mods | Sodium 0.9.3, Iris 1.12 (a local build with Distant Horizons 3.4 and Sodium 0.9.3 support), Distant Horizons 3.4, Entity Model Features / Entity Texture Features with Fresh Animations, Controlify 3.5.3, Reflex 1.1.6. Also tested without Sodium, Iris and Distant Horizons (vanilla renderer) on both backends. |
 | Shader packs | Complementary Unbound r5.10 + Euphoria Patches 1.11.2 (RTX 4050), Mellow 3.5 (Radeon 660M: about 30 real fps on its Fancy preset) |
 
-On integrated graphics, frame generation itself is cheap (about 0.4 ms per generated frame on the
-660M); Distant Horizons is the biggest cost, so set its CPU and Quality presets low.
+On integrated graphics a generated frame at 1080p costs about as much as a real one (on the 660M:
+about 4 ms for VFrameGen's passes plus the copies and presenting), so use only upscaling and
+anti-aliasing there (see the note at the top). Distant Horizons is also a big cost, so set its CPU
+and Quality presets low.
 
 Reports from other GPUs (Intel, desktop AMD) and other shader packs are very welcome.
 
