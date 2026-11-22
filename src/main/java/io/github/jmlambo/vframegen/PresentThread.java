@@ -239,6 +239,13 @@ public final class PresentThread {
         }
     }
 
+    /** Frames waiting to be shown (real and generated, the one being shown included). */
+    public static int queued() {
+        synchronized (signal) {
+            return jobs.size() + (busy ? 1 : 0);
+        }
+    }
+
     /** Present everything still queued, now (before the swapchain is recreated or destroyed). */
     public static void drain() {
         if (thread == null) return;
@@ -316,6 +323,13 @@ public final class PresentThread {
 
     private static int lastOf = 2;
     private static volatile int droppedPending;
+    // Dropped pending frames since adaptive mode last looked (FrameGenerator.framesPerReal).
+    private static final java.util.concurrent.atomic.AtomicInteger droppedForAdaptive = new java.util.concurrent.atomic.AtomicInteger();
+
+    /** Generated frames drawn but dropped (no image when due) since the last call. */
+    public static int takeDropped() {
+        return droppedForAdaptive.getAndSet(0);
+    }
     // The game's queue, from its own presents (real frames).
     private static VkQueue gameQueue;
 
@@ -346,6 +360,7 @@ public final class PresentThread {
                 surfaceLost = true;
             } else if (result != VK_SUCCESS) {
                 droppedPending++;
+                droppedForAdaptive.incrementAndGet();
                 return;
             }
         } else {

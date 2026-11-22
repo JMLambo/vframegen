@@ -78,9 +78,11 @@ between the one on screen (A) and the held one (B) are built from both, then B i
 5. The held item and the GUI are not warped. They come from the frame nearer in time.
 
 **Adaptive frame generation** (off by default). Instead of a fixed multiplier, VFrameGen picks
-how many frames to show per real frame (1 to 6) so that real and generated frames together reach a
+how many frames to show per real frame (1 to 8, two more than a fixed multiplier) so that real and generated frames together reach a
 target frame rate. When the real frame rate drops, more frames are generated; when the real frames
-reach the target alone, none are. Real frames are capped at the target.
+reach the target alone, none are. Real frames are capped at the target. When generated frames get
+dropped (drawn, but no swapchain image was free when due), it asks for fewer for a few seconds,
+so that GPU time goes back to the real frames.
 
 **Low-latency mode.** Nothing is held. The last real frame is warped toward the camera of the
 frame about to render. This has less delay but is less accurate.
@@ -101,6 +103,30 @@ frame about to render. This has less delay but is less accurate.
 multiplier, so no frame is produced that the screen cannot show. Some virtual displays (for example
 Sunshine streaming) report 60 Hz while running at 120. In that case set **Display refresh rate** by
 hand.
+
+## What to expect
+
+Frame generation makes motion smoother; it does not make the game itself run faster.
+
+- **Real frame rate drops a little.** Every generated frame takes GPU time, so the game renders
+  slightly fewer real frames with frame generation on (typically 10–20%, more at high multipliers
+  with a heavy shader pack). For example, 41 real fps with it off became 37 real + 37 generated
+  (75 shown) at 2x in one test with Complementary and Distant Horizons.
+- **Adaptive mode may not reach its target.** When the GPU is already maxed out, more generated
+  frames would only lower the real frame rate further, so adaptive mode settles below the target
+  instead (and asks for fewer whenever generated frames are being dropped). A lower target, or
+  lighter shader settings, gets closer to it.
+- **Input delay is a bit higher in interpolated mode.** Each real frame is held back until the next
+  one is ready, so the frames in between can be built from both; that adds about one real frame of
+  delay (less noticeable at higher real frame rates). Low-latency mode does not hold frames back, at
+  some cost in accuracy, and Reflex helps either way.
+- **With a shader pack, use upscaling too.** A render scale of about 75–85% (edge-adaptive, which
+  is what Temporal falls back to with a pack) frees the most GPU time where it is scarcest: a
+  higher real frame rate means less input delay, fewer artifacts, and generated frames that have
+  less to guess. Much lower and shader packs get visibly grainy.
+- **Fast turns can show artifacts at low real frame rates.** The lower the real frame rate, the
+  further each generated frame has to guess between two real ones. Above about 40 real fps it is
+  hard to notice.
 
 ## Compatibility
 
