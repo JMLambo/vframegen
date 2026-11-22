@@ -76,7 +76,7 @@ public final class FrameGenerator {
      */
     private static final float LOCKED_DISTANCE = 0.2f;
     // + entity count, and per source FrameSlot.MAX_ENTITIES x (box min, box max, motion).
-    private static final int UBO_SIZE = 7 * 64 + 6 * 16 + 2 * FrameSlot.MAX_ENTITIES * 4 * 16 + 2 * 64 + 2 * 16;
+    private static final int UBO_SIZE = 7 * 64 + 6 * 16 + 2 * FrameSlot.MAX_ENTITIES * 4 * 16 + 2 * 64 + 3 * 16;
 
     /** What vanilla's blit + present show at the end of this loop. */
     public enum Present { VANILLA, HELD }
@@ -1242,6 +1242,74 @@ public final class FrameGenerator {
         }
     }
 
+    /** One reprojection draw into target. variant: 0 full resolution, 1 at the render scale (LOWRES), 2 the full-resolution GUI pass on top of its upscale (COMPOSITE). */
+    private void reprojectPass(CommandEncoder encoder, GpuTextureView target, int variant, FrameSlot a, FrameSlot b,
+                               GpuSampler linear, GpuSampler nearest) {
+        try (RenderPass pass = encoder.createRenderPass(() -> variant == 1 ? "VFrameGen (render scale)" : variant == 2 ? "VFrameGen (full-resolution GUI)" : "VFrameGen", target, Optional.empty())) {
+            pass.setPipeline(RenderSystem.getCompiledPipeline(pipeline(colorFormat, b != null, variant)));
+            bindSource(pass, "A", a, linear, nearest);
+            if (b != null) {
+                bindSource(pass, "B", b, linear, nearest);
+                // Unused (FlowParams.x = 0) without a flow, but the pipeline still needs something bound.
+                pass.setUniform("FlowA", flow != null ? flow.backwardView : a.worldView, linear);
+                pass.setUniform("FlowB", flow != null ? flow.forwardView : a.worldView, linear);
+            }
+            if (variant == 2) pass.setUniform("Upscaled", upView, nearest);
+            pass.setUniform("FrameGen", ubo);
+            pass.draw(3, 1, 0, 0);
+        }
+    }
+
+    // Generated frames at the render scale: the search (most of their GPU time) runs on the render
+    // scale's pixels, the result is upscaled like a real frame, and a cheap full-resolution pass puts
+    // the GUI and held item back on top, sharp.
+    private GpuTexture lowTex, upTmpTex, upTex;
+    private GpuTextureView lowView, upTmpView, upView;
+    private int lowW, lowH, upW, upH;
+    private GpuFormat lowFormat;
+
+    private boolean generateAtRenderScale() {
+        if (renderWidth >= width && renderHeight >= height) return false;
+        FrameGenConfig cfg = VFrameGen.config();
+        return cfg.upscaler != FrameGenConfig.Upscaler.TEMPORAL
+                || cfg.generatedUpscaler != FrameGenConfig.GeneratedUpscaler.FULL_RESOLUTION;
+    }
+
+    /** Edge-adaptive or bicubic, the same as the real frames (Temporal: the generated-frame setting). */
+    private static boolean generatedEdgeAdaptive() {
+        FrameGenConfig cfg = VFrameGen.config();
+        return switch (cfg.upscaler) {
+            case BICUBIC -> false;
+            case EDGE_ADAPTIVE -> true;
+            case TEMPORAL -> cfg.generatedUpscaler != FrameGenConfig.GeneratedUpscaler.BICUBIC;
+        };
+    }
+
+    private void ensureLowRes(GpuDevice device) {
+        int usage = GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING;
+        if (lowTex == null || lowW != renderWidth || lowH != renderHeight || lowFormat != colorFormat) {
+            if (lowView != null) lowView.close();
+            if (lowTex != null) lowTex.close();
+            lowTex = device.createTexture("VFrameGen generated (render scale)", usage | GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_COPY_SRC, colorFormat, renderWidth, renderHeight, 1, 1);
+            lowView = device.createTextureView(lowTex);
+            lowW = renderWidth;
+            lowH = renderHeight;
+        }
+        if (upTex == null || upW != width || upH != height || lowFormat != colorFormat) {
+            if (upTmpView != null) upTmpView.close();
+            if (upTmpTex != null) upTmpTex.close();
+            if (upView != null) upView.close();
+            if (upTex != null) upTex.close();
+            upTmpTex = device.createTexture("VFrameGen generated upscale", usage, colorFormat, width, height, 1, 1);
+            upTmpView = device.createTextureView(upTmpTex);
+            upTex = device.createTexture("VFrameGen generated upscaled", usage | GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_COPY_SRC, colorFormat, width, height, 1, 1);
+            upView = device.createTextureView(upTex);
+            upW = width;
+            upH = height;
+        }
+        lowFormat = colorFormat;
+    }
+
     /**
      * Draw the frame for camera dstPos / dstViewRot / dstProj into outTex, from source a alone, or
      * from a and b blended at t (interpolated mode).
@@ -1267,6 +1335,7 @@ public final class FrameGenerator {
         // Motion blur takes depth from the frame that builds most of the picture.
         genSrc = b != null && t >= 0.5f ? b : a;
         genPos.set(dstPos);
+        boolean lowRes = generateAtRenderScale();
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
             Std140Builder ub = Std140Builder.onStack(stack, UBO_SIZE).putMat4f(dstInvViewProjRot);
@@ -1293,6 +1362,8 @@ public final class FrameGenerator {
             // directions more than a pixel apart) the flow moved 1-7% of the screen that depth already
             // had right; above it, 0.05%, while burning mobs' fire was still followed.
             ub.putVec4(2.5f, 48f, flow != null ? flow.width : 0f, flow != null ? flow.height : 0f);
+            ub.putVec4(lowRes ? (float) renderWidth / width : 1f,
+                    lowRes && cfg.upscaler != FrameGenConfig.Upscaler.TEMPORAL ? 1f : 0f, 0f, 0f);
             ByteBuffer data = ub.get();
             encoder.writeToBuffer(ubo.slice(), data);
         }
@@ -1300,17 +1371,18 @@ public final class FrameGenerator {
         GpuSampler linear = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);
         GpuSampler nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
         GpuQueryPool timer = startGpuTimer(device, encoder);
-        try (RenderPass pass = encoder.createRenderPass(() -> "VFrameGen", outView, Optional.empty())) {
-            pass.setPipeline(RenderSystem.getCompiledPipeline(pipeline(colorFormat, b != null)));
-            bindSource(pass, "A", a, linear, nearest);
-            if (b != null) {
-                bindSource(pass, "B", b, linear, nearest);
-                // Unused (FlowParams.x = 0) without a flow, but the pipeline still needs something bound.
-                pass.setUniform("FlowA", flow != null ? flow.backwardView : a.worldView, linear);
-                pass.setUniform("FlowB", flow != null ? flow.forwardView : a.worldView, linear);
-            }
-            pass.setUniform("FrameGen", ubo);
-            pass.draw(3, 1, 0, 0);
+        if (lowRes) {
+            ensureLowRes(device);
+            reprojectPass(encoder, lowView, 1, a, b, linear, nearest);
+            // Anti-aliased before the upscale (on the render scale's pixels, half the cost or less):
+            // the real frames get it after theirs, but without it the generated frames' edges came out
+            // jagged next to the real frames' smooth ones, and distant detail flickered.
+            AntiAliasing.applyGenerated(lowTex, lowView);
+            RenderScale.upscaleGenerated(encoder, lowView, renderWidth, renderHeight, upTmpView, upView,
+                    width, height, colorFormat, generatedEdgeAdaptive());
+            reprojectPass(encoder, outView, 2, a, b, linear, nearest);
+        } else {
+            reprojectPass(encoder, outView, 0, a, b, linear, nearest);
         }
         if (timer != null) encoder.writeTimestamp(timer, 1);
         return encoder;
@@ -1652,8 +1724,8 @@ public final class FrameGenerator {
     private static OpticalFlow.Pair flowFor(FrameSlot a, FrameSlot b) {
         return useShaderFlow() ? ShaderFlow.forPair(a.noHand, b.noHand) : OpticalFlow.forPair(a.noHand, b.noHand);
     }
-    private RenderPipeline pipeline(GpuFormat format, boolean interpolate) {
-        String key = format.name() + (interpolate ? "_interpolate" : "");
+    private RenderPipeline pipeline(GpuFormat format, boolean interpolate, int variant) {
+        String key = format.name() + (interpolate ? "_interpolate" : "") + (variant == 1 ? "_lowres" : variant == 2 ? "_composite" : "");
         return pipelines.computeIfAbsent(key, k -> {
             BindGroupLayout.Builder layout = BindGroupLayout.builder();
             for (String id : interpolate ? new String[]{"A", "B"} : new String[]{"A"}) {
@@ -1665,6 +1737,7 @@ public final class FrameGenerator {
                 layout.withUniform("FlowA", UniformType.COMBINED_IMAGE_SAMPLER);
                 layout.withUniform("FlowB", UniformType.COMBINED_IMAGE_SAMPLER);
             }
+            if (variant == 2) layout.withUniform("Upscaled", UniformType.COMBINED_IMAGE_SAMPLER);
             layout.withUniform("FrameGen", UniformType.UNIFORM_BUFFER);
             RenderPipeline.Builder builder = RenderPipeline.builder()
                     .withLocation(Identifier.fromNamespaceAndPath(VFrameGen.MOD_ID, "pipeline/reproject_" + k.toLowerCase(Locale.ROOT)))
@@ -1674,6 +1747,8 @@ public final class FrameGenerator {
                     .withColorTargetState(new ColorTargetState(Optional.empty(), format, ColorTargetState.WRITE_ALL))
                     .withPrimitiveTopology(PrimitiveTopology.TRIANGLES);
             if (interpolate) builder.withShaderDefine("INTERPOLATE");
+            if (variant == 1) builder.withShaderDefine("LOWRES");
+            if (variant == 2) builder.withShaderDefine("COMPOSITE");
             return builder.build();
         });
     }

@@ -15,6 +15,8 @@ public final class FrameGenConfig {
     public enum DepthMode { AUTO, DEPTH, ROTATION_ONLY }
     public enum Pacing { OFF, BALANCED }
     public enum Upscaler { BICUBIC, EDGE_ADAPTIVE, TEMPORAL }
+    /** How generated frames are upscaled while the real frames use the Temporal upscaler. */
+    public enum GeneratedUpscaler { FULL_RESOLUTION, BICUBIC, EDGE_ADAPTIVE }
     public enum AntiAliasingMode { OFF, FXAA, SMAA }
 
     public static final int MAX_MULTIPLIER = 6;
@@ -55,6 +57,7 @@ public final class FrameGenConfig {
     public int displayHz = 0;
     public double upscaleSharpness = 0.5;
     public Upscaler upscaler = Upscaler.BICUBIC;
+    public GeneratedUpscaler generatedUpscaler = GeneratedUpscaler.EDGE_ADAPTIVE;
     public boolean debugTint = false;
     public boolean debugCaptures = false;
     public boolean debugFrameLog = false;
@@ -118,6 +121,12 @@ public final class FrameGenConfig {
                                     full-resolution detail from several jittered frames (also
                                     anti-aliases, even at 100% render scale; FXAA/SMAA are skipped);
                                     edge-adaptive while a shader pack is on.
+            generatedUpscaler       FULL_RESOLUTION, BICUBIC or EDGE_ADAPTIVE, only with the TEMPORAL upscaler
+                                    (which generated frames can't use): below 100% render scale,
+                                    generated frames are drawn at the render scale and upscaled
+                                    with this, or drawn at full resolution (the most GPU time).
+                                    With BICUBIC or EDGE_ADAPTIVE they use the same upscaler as
+                                    the real frames.
             upscaleSharpness        0 to 1: contrast-adaptive sharpening after the upscale.
             debugTint               tint generated frames magenta, to see which frames are generated.
             debugCaptures           F8 (or the controller button) saves the next frames as images.
@@ -191,6 +200,7 @@ public final class FrameGenConfig {
                 c.dynamicRenderScale = bool(props, "dynamicRenderScale", c.dynamicRenderScale);
                 c.firstRunPending = bool(props, "firstRunPending", false);
                 c.upscaler = enumOf(props, "upscaler", c.upscaler, Upscaler.class);
+                c.generatedUpscaler = enumOf(props, "generatedUpscaler", c.generatedUpscaler, GeneratedUpscaler.class);
                 c.upscaleSharpness = Math.clamp(dbl(props, "upscaleSharpness", c.upscaleSharpness), 0.0, 1.0);
             } catch (IOException | RuntimeException e) {
                 VFrameGen.LOGGER.warn("Could not read {}, using defaults; a copy is kept before settings are saved over it", p, e);
@@ -259,6 +269,7 @@ public final class FrameGenConfig {
         values.put("firstRunPending", Boolean.toString(firstRunPending));
         values.put("upscaleSharpness", Double.toString(upscaleSharpness));
         values.put("upscaler", upscaler.name());
+        values.put("generatedUpscaler", generatedUpscaler.name());
         StringBuilder out = new StringBuilder();
         for (String line : HEADER.split("\n", -1)) {
             out.append(line.isEmpty() ? "#" : "# " + line).append('\n');

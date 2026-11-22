@@ -103,6 +103,11 @@ final class ClothConfigScreen {
         // Temporal upscaling anti-aliases on its own, except with a shader pack (spatial fallback).
         Requirement temporalAa = Compat.irisShadersActive() ? () -> true
                 : Requirement.not(Requirement.isValue(upscaler, FrameGenConfig.Upscaler.TEMPORAL));
+        upscaling.addEntry(e.startEnumSelector(t("generatedUpscaler"), FrameGenConfig.GeneratedUpscaler.class, cfg.generatedUpscaler)
+                .setDefaultValue(def.generatedUpscaler).setTooltip(tip("generatedUpscaler"))
+                .setEnumNameProvider(v -> Component.translatable("vframegen.config.generatedUpscaler." + v.name().toLowerCase(java.util.Locale.ROOT)))
+                .setRequirement(Requirement.isValue(upscaler, FrameGenConfig.Upscaler.TEMPORAL))
+                .setSaveConsumer(v -> cfg.generatedUpscaler = v).build());
         upscaling.addEntry(e.startIntSlider(t("upscaleSharpness"), (int) Math.round(cfg.upscaleSharpness * 100), 0, 100)
                 .setDefaultValue((int) Math.round(def.upscaleSharpness * 100)).setTooltip(tip("upscaleSharpness"))
                 .setTextGetter(v -> Component.literal(v + "%"))

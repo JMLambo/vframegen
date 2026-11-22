@@ -24,6 +24,12 @@ pacing.
 > (see [Tested with](#tested-with)). Expect rough edges on other hardware and mod combinations, and
 > please [report them](https://github.com/JMLambo/vframegen/issues/new/choose).
 
+> **Integrated graphics:** recommended to use only **upscaling and anti-aliasing** (render scale
+> below 100%, an upscaler, and FXAA or SMAA) when playing on integrated graphics, with frame
+> generation off. (If your PC doesn't have a dedicated graphics card, this applies to you.) There,
+> a generated frame costs almost as much as a real one, so frame generation trades real frames for
+> generated ones: the picture looks a little smoother, but the game responds worse.
+
 ## Installing
 
 1. Install [Fabric Loader](https://fabricmc.net/use/) for Minecraft 26.3 and
@@ -53,8 +59,10 @@ Requires Java 25, which Minecraft 26.3 already uses.
 | Mods | Sodium 0.9.3, Iris 1.12 (a local build with Distant Horizons 3.4 and Sodium 0.9.3 support), Distant Horizons 3.4, Entity Model Features / Entity Texture Features with Fresh Animations, Controlify 3.5.3, Reflex 1.1.6. Also tested without Sodium, Iris and Distant Horizons (vanilla renderer) on both backends. |
 | Shader packs | Complementary Unbound r5.10 + Euphoria Patches 1.11.2 (RTX 4050), Mellow 3.5 (Radeon 660M: about 30 real fps on its Fancy preset) |
 
-On integrated graphics, frame generation itself is cheap (about 0.4 ms per generated frame on the
-660M); Distant Horizons is the biggest cost, so set its CPU and Quality presets low.
+On integrated graphics a generated frame at 1080p costs about as much as a real one (on the 660M:
+about 4 ms for VFrameGen's passes plus the copies and presenting), so use only upscaling and
+anti-aliasing there (see the note at the top). Distant Horizons is also a big cost, so set its CPU
+and Quality presets low.
 
 Reports from other GPUs (Intel, desktop AMD) and other shader packs are very welcome.
 
@@ -125,6 +133,17 @@ Frame generation makes motion smoother; it does not make the game itself run fas
   one is ready, so the frames in between can be built from both; that adds about one real frame of
   delay (less noticeable at higher real frame rates). Low-latency mode does not hold frames back, at
   some cost in accuracy, and Reflex helps either way.
+- **On integrated graphics, use upscaling and anti-aliasing instead.** (If your PC doesn't have a
+  dedicated graphics card, this means you.) Integrated graphics share the computer's memory and
+  have far less GPU power, and a generated frame needs nearly the same work as a real one to put on
+  screen: reprojecting every pixel, copying the image, and presenting it. On a Radeon 660M at
+  1080p, each generated frame cost about as much time as a real one, so 50 real fps with frame
+  generation off became about 40 real + 20 generated: a little smoother, but the game itself
+  responded worse. A render scale below 100% with an upscaler and FXAA or SMAA makes the real
+  frames cheaper instead, which raises the real frame rate outright, with no artifacts. Adaptive
+  mode keeps generated frames to a share of the GPU's time, so leaving frame generation on can't
+  drag the real frame rate down far, but at 1080p it gains little. (It does better at lower
+  window resolutions, where each generated frame costs less.)
 - **With a shader pack, use upscaling too.** A render scale of about 75–85% (edge-adaptive, which
   is what Temporal falls back to with a pack) frees the most GPU time where it is scarcest: a
   higher real frame rate means less input delay, fewer artifacts, and generated frames that have

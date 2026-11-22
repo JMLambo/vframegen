@@ -58,7 +58,13 @@ public final class AntiAliasing {
     public static void apply(GameRenderer gr) {
         FrameGenConfig.AntiAliasingMode mode = VFrameGen.config().antiAliasing;
         // Free SMAA's two screen-sized targets when it is not in use.
-        if (mode != FrameGenConfig.AntiAliasingMode.SMAA) closeSmaaTargets();
+        if (mode != FrameGenConfig.AntiAliasingMode.SMAA) {
+            // Both banks: the real frames' and the generated frames' (swapped in for a moment).
+            closeSmaaTargets();
+            swapTargets();
+            closeSmaaTargets();
+            swapTargets();
+        }
         if (broken || mode == FrameGenConfig.AntiAliasingMode.OFF) return;
         // Temporal upscaling already anti-aliased this frame.
         if (TemporalUpscaler.ranThisFrame()) return;
@@ -68,6 +74,48 @@ public final class AntiAliasing {
         GpuTexture color = main.getColorTexture();
         GpuTextureView colorView = main.getColorTextureView();
         if (color == null || colorView == null) return;
+        applyTo(color, colorView);
+    }
+
+    /**
+     * A generated frame drawn at the render scale and upscaled: the same anti-aliasing as the real
+     * frames get after their upscale, or its distant edges flicker between smooth and jagged.
+     */
+    public static void applyGenerated(GpuTexture color, GpuTextureView colorView) {
+        FrameGenConfig.AntiAliasingMode mode = VFrameGen.config().antiAliasing;
+        if (broken || mode == FrameGenConfig.AntiAliasingMode.OFF) return;
+        if (VFrameGen.config().upscaler == FrameGenConfig.Upscaler.TEMPORAL && !Compat.irisShadersActive()) return;
+        if (RenderSystemAccessor.vframegen$getCurrentPipelineCache() == null) return;
+        // Its own working textures (at the render scale), so the real frames' (window-sized) ones are
+        // not reallocated twice per frame.
+        swapTargets();
+        try {
+            applyTo(color, colorView);
+        } finally {
+            swapTargets();
+        }
+    }
+
+    // The generated frames' working textures while the real frames' are in use, and the other way round.
+    private static GpuTexture otherTempTex, otherEdgesTex, otherWeightsTex;
+    private static GpuTextureView otherTempView, otherEdgesView, otherWeightsView;
+    private static int otherW = -1, otherH = -1;
+    private static GpuFormat otherFormat;
+
+    private static void swapTargets() {
+        GpuTexture t = tempTex; tempTex = otherTempTex; otherTempTex = t;
+        t = edgesTex; edgesTex = otherEdgesTex; otherEdgesTex = t;
+        t = weightsTex; weightsTex = otherWeightsTex; otherWeightsTex = t;
+        GpuTextureView v = tempView; tempView = otherTempView; otherTempView = v;
+        v = edgesView; edgesView = otherEdgesView; otherEdgesView = v;
+        v = weightsView; weightsView = otherWeightsView; otherWeightsView = v;
+        int i = w; w = otherW; otherW = i;
+        i = h; h = otherH; otherH = i;
+        GpuFormat f = format; format = otherFormat; otherFormat = f;
+    }
+
+    private static void applyTo(GpuTexture color, GpuTextureView colorView) {
+        FrameGenConfig.AntiAliasingMode mode = VFrameGen.config().antiAliasing;
         try {
             boolean smaa = mode == FrameGenConfig.AntiAliasingMode.SMAA;
             int q = Math.clamp(VFrameGen.config().antiAliasingQuality, 1, 4);

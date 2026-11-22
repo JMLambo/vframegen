@@ -57,7 +57,16 @@ layout(std140) uniform FrameGen {
     mat4 BToA;      // position relative to B's camera -> A clip
     vec4 FlowParams; // x: optical flow on, y: trusted forward/backward disagreement (pixels^2), zw: texel value -> uv
     vec4 FlowLimits; // x: smallest residual used (pixels), y: largest, zw: measured image size (pixels)
+    vec4 Out;        // x: output pixels per full-resolution pixel (the render scale in the LOWRES pass, else 1),
+                     // y: LOWRES reads NoHand, the image the real frames are upscaled from
 };
+
+#ifdef COMPOSITE
+// LOWRES + COMPOSITE: generated frames drawn at the render scale. The LOWRES pass does the search
+// (most of the cost) on fewer pixels; it is upscaled like the real frames; this full-resolution pass
+// then puts back what must stay sharp, the GUI and the held item, and keeps the upscaled world.
+uniform sampler2D Upscaled;
+#endif
 
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
@@ -189,7 +198,40 @@ bool offscreen(vec2 uv) {
 // NoHand is read only there: with render scale it is the low-resolution image from before the
 // upscaler, and reading it everywhere made generated frames soft next to the upscaled real frames
 // (fine textures such as water flickered between sharp and soft: shaking).
+#ifdef LOWRES
+// Catmull-Rom (5 bilinear reads). Reading between the pixels of the small image with bilinear
+// filtering blurred it, and the upscaler then enlarged that blur: generated frames came out softer
+// than the real ones, and distant detail flickered between sharp and soft.
+vec3 catmullRom(sampler2D tex, vec2 uv) {
+    vec2 size = vec2(textureSize(tex, 0));
+    vec2 pos = uv * size;
+    vec2 c = floor(pos - 0.5) + 0.5;
+    vec2 f = pos - c;
+    vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+    vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+    vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+    vec2 w3 = f * f * (-0.5 + 0.5 * f);
+    vec2 w12 = w1 + w2;
+    vec2 t0 = (c - 1.0) / size, t3 = (c + 2.0) / size, t12 = (c + w2 / w12) / size;
+    vec3 r = texture(tex, vec2(t12.x, t0.y)).rgb * w12.x * w0.y
+           + texture(tex, vec2(t0.x, t12.y)).rgb * w0.x * w12.y
+           + texture(tex, t12).rgb * w12.x * w12.y
+           + texture(tex, vec2(t3.x, t12.y)).rgb * w3.x * w12.y
+           + texture(tex, vec2(t12.x, t3.y)).rgb * w12.x * w3.y;
+    float n = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;
+    return max(r / n, vec3(0.0));
+}
+#endif
+
 vec3 sceneColor(sampler2D world, sampler2D noHand, sampler2D mask, vec2 uv, vec4 flags) {
+#ifdef LOWRES
+    // At the render scale: the image the real frame was upscaled from (NoHand, before the upscaler
+    // and without the held item, which the full-resolution pass puts back), so the generated frame
+    // goes through the same upscale. Sampling the upscaled World here and upscaling it again made
+    // distant detail differ from the real frames: flicker. (Not with Temporal, Out.y = 0: its
+    // low-resolution image is jittered.)
+    if (Out.y > 0.5) return catmullRom(noHand, uv);
+#endif
     bool behindHand = false;
     if (flags.x > 0.5) {
         // Within a pixel of the hand too (the whole 3x3 around uv): a filtered World read there
@@ -219,12 +261,14 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
     vec3 finalPx = texture(finalTex, uvDst).rgb;
     vec3 worldPx = texture(world, uvDst).rgb;
     w.still = worldPx;
+#ifndef LOWRES // (the full-resolution pass after it keeps the GUI)
     vec3 diff = abs(finalPx - worldPx);
     if (max(diff.r, max(diff.g, diff.b)) > Params.x) {
         w.color = finalPx;
         w.reason = R_GUI;
         return w;
     }
+#endif
     // Held item: it moves with the camera, so it is not reprojected.
     vec2 m = texture(mask, uvDst).rg;
     if ((flags.x > 0.5 && m.r > 0.5) || (flags.y > 0.5 && m.g > 0.5)) {
@@ -245,7 +289,7 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
         // Two searches: from the rotation-only answer and from "nothing moved". Every step is a
         // candidate. One that lands within a pixel is a real match, and of those the nearest is
         // visible. With no match this spot was hidden in this source: fill from the background.
-        vec2 screen = 1.0 / Params2.zw;
+        vec2 screen = Out.x / Params2.zw; // output pixels
         vec2 bestHit = skyUv;
         float bestHitNear = 0.0;
         bool haveHit = false;
@@ -293,6 +337,8 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
                     haveMiss = true;
                 }
                 if (sky) break;
+                // Converged: the next step would read (almost) the same spot again.
+                if (errPx < 0.05) break;
                 uv += uvDst - landed;
             }
         }
@@ -365,45 +411,92 @@ vec3 debugColor(vec3 color, int reason) {
     return mix(vec3(lum * 0.6), tint, reason == R_HIT ? 0.0 : reason == R_FLOW ? 0.7 : 0.55);
 }
 
+bool isFixed(int reason) {
+    return reason == R_GUI || reason == R_HAND || reason == R_LOCKED;
+}
+
+// Whether a source keeps this pixel as it is (GUI or held item): warp()'s first checks, without
+// its search.
+bool fixedAt(vec2 uvDst, sampler2D world, sampler2D mask, sampler2D finalTex, vec4 flags) {
+#ifndef LOWRES
+    vec3 diff = abs(texture(finalTex, uvDst).rgb - texture(world, uvDst).rgb);
+    if (max(diff.r, max(diff.g, diff.b)) > Params.x) return true;
+#endif
+    vec2 m = texture(mask, uvDst).rg;
+    return (flags.x > 0.5 && m.r > 0.5) || (flags.y > 0.5 && m.g > 0.5);
+}
+
+Warp warpA(vec2 uvDst) {
+    return warp(uvDst, WorldA, DepthA, MaskA, NoHandA, FinalA, AInvViewProj, ADstViewProj, AViewProjRot, AFlags, false);
+}
+
+#ifdef INTERPOLATE
+Warp warpB(vec2 uvDst) {
+    return warp(uvDst, WorldB, DepthB, MaskB, NoHandB, FinalB, BInvViewProj, BDstViewProj, BViewProjRot, BFlags, true);
+}
+#endif
+
 void main() {
     vec2 uvDst = texCoord;
+#ifdef COMPOSITE
+    // GUI or held item in the frame that decides those (the one nearer in time): from it, at full
+    // resolution. Everything else: the upscaled world (already tinted / debug-coloured).
+#ifdef INTERPOLATE
+    bool useB = Mix.x >= 0.5;
+    bool fixedHere = useB ? fixedAt(uvDst, WorldB, MaskB, FinalB, BFlags) : fixedAt(uvDst, WorldA, MaskA, FinalA, AFlags);
+#else
+    bool useB = false;
+    bool fixedHere = fixedAt(uvDst, WorldA, MaskA, FinalA, AFlags);
+#endif
+    if (!fixedHere) {
+        fragColor = vec4(texture(Upscaled, uvDst).rgb, 1.0);
+        return;
+    }
+#ifdef INTERPOLATE
+    Warp n = useB ? warpB(uvDst) : warpA(uvDst);
+#else
+    Warp n = warpA(uvDst);
+#endif
+    vec3 color = n.color;
+    int reason = n.reason;
+#elif !defined(INTERPOLATE)
     Warp a = warp(uvDst, WorldA, DepthA, MaskA, NoHandA, FinalA, AInvViewProj, ADstViewProj, AViewProjRot, AFlags, false);
     vec3 color = a.color;
     int reason = a.reason;
-
-#ifdef INTERPOLATE
-    Warp b = warp(uvDst, WorldB, DepthB, MaskB, NoHandB, FinalB, BInvViewProj, BDstViewProj, BViewProjRot, BFlags, true);
+#else
+    vec3 color;
+    int reason;
+    // One frame builds the picture: the one nearer in time (B from halfway on). The other is only
+    // searched where it is needed (its search costs as much as the main one's, and most pixels never
+    // use it): a fill where the main frame found nothing.
     float t = Mix.x;
-    bool aFixed = a.reason == R_GUI || a.reason == R_HAND || a.reason == R_LOCKED;
-    bool bFixed = b.reason == R_GUI || b.reason == R_HAND || b.reason == R_LOCKED;
-    if (aFixed || bFixed) {
+    bool useB = t >= 0.5;
+    Warp p = useB ? warpB(uvDst) : warpA(uvDst);
+    bool pFixed = isFixed(p.reason);
+    bool oFixed = useB ? fixedAt(uvDst, WorldA, MaskA, FinalA, AFlags)
+                       : fixedAt(uvDst, WorldB, MaskB, FinalB, BFlags);
+    if (pFixed || oFixed) {
         // GUI or held item in either source: the source nearer in time decides the whole pixel
         // (its hand, its GUI, or its world there). Mixing would show both hand positions at once.
-        bool useB = t >= 0.5;
-        Warp n = useB ? b : a;
-        bool nFixed = useB ? bFixed : aFixed;
-        color = n.color;
-        reason = n.reason;
-        if (!nFixed && !n.hit) {
+        color = p.color;
+        reason = p.reason;
+        if (!pFixed && !p.hit) {
             // Where the other frame's hand was, and this one's warp found nothing (it lands on
             // its own hand edge): the world there barely moves in a fraction of a frame, so show
             // it unwarped instead of a fill that streaks.
-            color = n.still;
+            color = p.still;
             reason = R_ROTATION;
         }
-    } else {
-        // One frame builds the picture: the one nearer in time (B from halfway on). Choosing per
-        // pixel between A and B made edges a patchwork of both frames, which with a shader pack's
-        // TAA (soft, jittered edges that differ frame to frame) showed as every block edge
-        // shimmering. The other frame only fills what the main one could not see (uncovered
+    } else if (p.hit) {
+        // Choosing per pixel between A and B made edges a patchwork of both frames, which with a
+        // shader pack's TAA (soft, jittered edges that differ frame to frame) showed as every block
+        // edge shimmering. So the other frame only fills what the main one could not see (uncovered
         // behind a moving edge, or off its screen).
-        bool useB = t >= 0.5;
-        Warp p = useB ? b : a;
-        Warp o = useB ? a : b;
-        if (p.hit) {
-            color = p.color;
-            reason = p.flowed ? R_FLOW : p.reason;
-        } else if (o.hit && !o.entity) {
+        color = p.color;
+        reason = p.flowed ? R_FLOW : p.reason;
+    } else {
+        Warp o = useB ? warpA(uvDst) : warpB(uvDst);
+        if (o.hit && !o.entity) {
             // (Not a moving entity from the other frame: its limbs are in another pose there, and
             // filling from it showed both sets of legs.)
             color = o.color;
