@@ -919,8 +919,10 @@ public final class FrameGenerator {
     /** The most frames per real frame whose generated frames fit in that GPU budget. */
     private double gpuBudgetCeiling() {
         // What one generated frame costs: its pass on the GPU, plus any wait to hand it over.
-        double cost = Math.max(0, gpuPassAvgNs) + Math.max(0, genWallAvgNs);
-        if (cost <= 0 || adaptiveIntervalNs <= 0) return FrameGenConfig.ADAPTIVE_MAX_MULTIPLIER;
+        // Without the GPU timer (timestamp queries unsupported) the cost is unknown: the hand-over
+        // wait alone would undercount it, so no budget rather than a wrong one.
+        if (gpuPassAvgNs <= 0 || adaptiveIntervalNs <= 0) return FrameGenConfig.ADAPTIVE_MAX_MULTIPLIER;
+        double cost = gpuPassAvgNs + Math.max(0, genWallAvgNs);
         return Math.clamp(1.0 + GPU_BUDGET_SHARE * adaptiveIntervalNs / cost, 1.0, FrameGenConfig.ADAPTIVE_MAX_MULTIPLIER);
     }
 
