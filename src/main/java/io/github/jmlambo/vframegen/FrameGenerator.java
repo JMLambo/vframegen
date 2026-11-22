@@ -98,6 +98,8 @@ public final class FrameGenerator {
     private RenderPipeline maskPipeline;
     // Motion blur (motionblur.fsh): its output, and the camera of the frame shown before.
     private GpuTexture blurTex;
+    // Vulkan with a present queue: buffers generated frames wait in until due (PresentQueue).
+    private final GpuTexture[] pendingTex = new GpuTexture[PresentQueue.SLOTS];
     private GpuTextureView blurView;
     private GpuBuffer blurUbo;
     private static final int BLUR_UBO_SIZE = 3 * 64 + 11 * 16 + FrameSlot.MAX_ENTITIES * 3 * 16;
@@ -1766,6 +1768,63 @@ public final class FrameGenerator {
         return true;
     }
 
+    private void createPendingTextures(GpuDevice device, int w, int h, GpuFormat color) {
+        PresentQueue.setSlotImages(null);
+        for (int i = 0; i < pendingTex.length; i++) {
+            if (pendingTex[i] != null) pendingTex[i].close();
+            pendingTex[i] = null;
+        }
+        if (!PresentQueue.available()) return;
+        long[] images = new long[pendingTex.length];
+        for (int i = 0; i < pendingTex.length; i++) {
+            pendingTex[i] = device.createTexture("VFrameGen pending generated frame " + i,
+                    GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_COPY_SRC, color, w, h, 1, 1);
+            if (!(pendingTex[i] instanceof com.mojang.renderpearl.backend.vulkan.VulkanGpuTexture vk)) return;
+            images[i] = vk.vkImage();
+        }
+        PresentQueue.setSlotImages(images);
+    }
+
+    /**
+     * Present queue: draw generated frame k of the pair into a pending buffer and hand it to the
+     * present thread, which takes a swapchain image for it only when it is due. False when no
+     * buffer is free (all still waiting to be shown): the rest of the pair is skipped.
+     */
+    private boolean stageGenerated(Minecraft mc, int k, String where) {
+        int slot = PresentQueue.takeSlot();
+        if (slot < 0) return false;
+        nextFrame = k;
+        long t0 = System.nanoTime();
+        CommandEncoder encoder = renderInterpolated(k / (double) frames);
+        if (VFrameGen.config().debugFrameLog) {
+            DebugCapture.sequenceFrame(outTex, "gen", String.format(Locale.ROOT, "f=%.3f (%s, pending %d) pos %.4f %.4f %.4f",
+                    lastGenF, where, slot, lastGenPos.x, lastGenPos.y, lastGenPos.z));
+        }
+        GpuTextureView shownView = genSrc != null ? motionBlur(encoder, outView, genSrc, genPos, dstViewRot, dstProj) : outView;
+        encoder.copyTextureToTexture(shownView.texture(), pendingTex[slot], 0, 0, 0, 0, 0, width, height);
+        long value = PresentQueue.nextTimelineValue();
+        ((com.mojang.renderpearl.backend.vulkan.VulkanCommandEncoder) ((com.mojang.renderpearl.frontend.FrontendCommandEncoder) encoder).backend())
+                .signalSemaphore(PresentQueue.timeline(), value, 0x10000L);
+        submittingGenerated = true;
+        try {
+            encoder.submit();
+        } finally {
+            submittingGenerated = false;
+        }
+        PresentThread.deferPending(slot, value, k, frames);
+        long t1 = System.nanoTime();
+        costSubmitNs += t1 - t0;
+        genCostNs += t1 - t0;
+        notePresent();
+        screenEvent(System.nanoTime() + (gpuPassCount == 0 ? 1_000_000L : gpuPassNs / gpuPassCount), false);
+        statsGenerated++;
+        secGenerated++;
+        MinecraftAccessor counter = (MinecraftAccessor) mc;
+        counter.vframegen$setFrames(counter.vframegen$getFrames() + 1);
+        if (capture) DebugCapture.save(outTex, k + "-generated");
+        return true;
+    }
+
     private void ensureResources(int w, int h, int rw, int rh, GpuFormat color, GpuFormat depth) {
         if (w == width && h == height && rw == renderWidth && rh == renderHeight
                 && color == colorFormat && depth == depthFormat && outTex != null) return;
@@ -1785,6 +1844,7 @@ public final class FrameGenerator {
                 GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_SRC,
                 color, w, h, 1, 1);
         blurView = device.createTextureView(blurTex);
+        createPendingTextures(device, w, h, color);
         if (blurUbo == null) {
             blurUbo = device.createBuffer(() -> "VFrameGen motion blur uniforms", GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, BLUR_UBO_SIZE);
         }
@@ -1863,7 +1923,15 @@ public final class FrameGenerator {
                 DebugCapture.save(shown.finalImage, "0-real-A");
             }
             genStartNs = System.nanoTime();
-            for (int k = 1; k < frames; k++) {
+            if (PresentQueue.ready()) {
+                for (int k = 1; k < frames; k++) {
+                    if (!stageGenerated(mc, k, "present queue")) {
+                        statsSkips.merge("no-buffer", frames - k, Integer::sum);
+                        break;
+                    }
+                    StallProbe.mark("gen frame");
+                }
+            } else for (int k = 1; k < frames; k++) {
                 // No free image: skip the rest of this pair's generated frames rather than
                 // wait, so frame generation never slows the real frames down.
                 if (!PresentThread.imageFree()) {

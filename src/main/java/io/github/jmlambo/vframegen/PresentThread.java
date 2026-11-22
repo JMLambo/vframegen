@@ -40,8 +40,11 @@ public final class PresentThread {
     /** What the next present() on the render thread is. */
     public enum Kind { ASAP, REAL, GENERATED }
 
+    // pendingSlot >= 0: a generated frame waiting in a PresentQueue buffer (no swapchain image yet),
+    // drawn once the game's queue signals PresentQueue.timeline() at drawnValue.
     private record Job(Kind kind, VkQueue queue, long swapchain, int imageIndex, long waitSemaphore,
-                       int k, int of, VkDevice device, long timeline, long timelineValue) {
+                       int k, int of, VkDevice device, long timeline, long timelineValue,
+                       int pendingSlot, long drawnValue) {
     }
 
     private static final ArrayDeque<Job> jobs = new ArrayDeque<>();
@@ -49,6 +52,7 @@ public final class PresentThread {
     private static Thread thread;
     private static volatile boolean busy;
     private static volatile Kind busyKind;
+    private static volatile boolean busyPending;
     private static volatile boolean surfaceLost;
 
     // Set by the render thread for the present() it is about to make.
@@ -166,9 +170,10 @@ public final class PresentThread {
             engineHeld--;
             lastAcquireWaitNs = System.nanoTime();
         }
-        int held;
+        int held = 0;
         synchronized (signal) {
-            held = jobs.size() + (busy ? 1 : 0);
+            for (Job job : jobs) if (job.pendingSlot < 0) held++;
+            if (busy && !busyPending) held++;
         }
         return held + 1 + engineHeld + 2 <= count;
     }
@@ -187,7 +192,7 @@ public final class PresentThread {
     public static int defer(VkQueue queue, VkPresentInfoKHR info) {
         Job job = new Job(nextKind, queue, info.pSwapchains().get(0), info.pImageIndices().get(0),
                 info.waitSemaphoreCount() > 0 ? info.pWaitSemaphores().get(0) : 0L, nextK, nextOf,
-                device, timeline, timelineValue);
+                device, timeline, timelineValue, -1, 0L);
         nextKind = Kind.ASAP;
         start();
         synchronized (signal) {
@@ -196,6 +201,20 @@ public final class PresentThread {
             signal.notifyAll();
         }
         return VK_SUCCESS;
+    }
+
+    /**
+     * Render thread: generated frame k of of, drawn into PresentQueue buffer slot (signalling the
+     * present queue's timeline at drawnValue); shown at its time with an image taken only then.
+     */
+    public static void deferPending(int slot, long drawnValue, int k, int of) {
+        Job job = new Job(Kind.GENERATED, null, 0L, -1, 0L, k, of, null, 0L, 0L, slot, drawnValue);
+        start();
+        synchronized (signal) {
+            jobs.addLast(job);
+            maxQueued = Math.max(maxQueued, jobs.size());
+            signal.notifyAll();
+        }
     }
 
     /** Present everything still queued, now (before the swapchain is recreated or destroyed). */
@@ -225,11 +244,14 @@ public final class PresentThread {
         int g = presentedGenerated, r = presentedReal;
         double late = g == 0 ? 0 : lateMsSum / g;
         int q = maxQueued;
+        int dropped = droppedPending;
+        droppedPending = 0;
         presentedGenerated = presentedReal = 0;
         lateMsSum = 0;
         maxQueued = 0;
-        return String.format(java.util.Locale.ROOT, "present thread: %d real, %d generated, generated %.2f ms late on average, real interval %.1f ms, most frames waiting %d",
-                r, g, late, realIntervalNs / 1e6, q);
+        return String.format(java.util.Locale.ROOT, "present thread: %d real, %d generated, generated %.2f ms late on average, real interval %.1f ms, most frames waiting %d%s",
+                r, g, late, realIntervalNs / 1e6, q,
+                PresentQueue.ready() ? ", present queue on" + (dropped == 0 ? "" : " (" + dropped + " dropped: no image when due)") : "");
     }
 
     private static synchronized void start() {
@@ -255,6 +277,7 @@ public final class PresentThread {
                 job = jobs.pollFirst();
                 busy = true;
                 busyKind = job.kind;
+                busyPending = job.pendingSlot >= 0;
             }
             try {
                 handle(job);
@@ -270,6 +293,7 @@ public final class PresentThread {
     }
 
     private static int lastOf = 2;
+    private static volatile int droppedPending;
 
     private static void handle(Job job) {
         if (job.kind == Kind.GENERATED) lastOf = Math.max(2, job.of);
@@ -288,7 +312,21 @@ public final class PresentThread {
             waitUntil(due);
             lateMsSum += Math.max(0, System.nanoTime() - due) / 1e6;
         }
-        present(job);
+        if (job.pendingSlot >= 0) {
+            if (draining) {
+                PresentQueue.release(job.pendingSlot);
+                return;
+            }
+            int result = PresentQueue.show(job.pendingSlot, job.drawnValue);
+            if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+                surfaceLost = true;
+            } else if (result != VK_SUCCESS) {
+                droppedPending++;
+                return;
+            }
+        } else {
+            present(job);
+        }
         long now = System.nanoTime();
         if (job.kind == Kind.REAL) {
             presentedReal++;
