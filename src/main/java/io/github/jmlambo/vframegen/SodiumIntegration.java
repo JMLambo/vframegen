@@ -19,21 +19,13 @@ import java.util.function.Supplier;
  * (limits, reprojection, debug) stay in the full settings screen, linked from the page.
  */
 public final class SodiumIntegration implements ConfigEntryPoint {
-    private int maxFramesBefore;
-
     @Override
     public void registerConfigLate(ConfigBuilder b) {
         FrameGenConfig cfg = VFrameGen.config();
         FrameGenConfig def = new FrameGenConfig();
-        maxFramesBefore = cfg.maxFramesPerReal();
         StorageEventHandler storage = () -> {
             cfg.save();
-            FrameGenerator.INSTANCE.invalidate();
-            // The swapchain's image count follows the multiplier: recreate it.
-            if (cfg.maxFramesPerReal() != maxFramesBefore) {
-                maxFramesBefore = cfg.maxFramesPerReal();
-                FrameGenerator.recreateSurface(Minecraft.getInstance());
-            }
+            FrameGenerator.afterConfigSaved(Minecraft.getInstance());
         };
 
         OptionGroupBuilder general = b.createOptionGroup()
@@ -49,7 +41,7 @@ public final class SodiumIntegration implements ConfigEntryPoint {
                         .setBinding(v -> cfg.multiplier = v, () -> cfg.multiplier))
                 .addOption(b.createIntegerOption(id("targetFps"))
                         .setName(t("targetFps")).setTooltip(tip("targetFps"))
-                        .setRange(30, FrameGenConfig.MAX_TARGET_FPS, 5)
+                        .setRange(30, FrameGenConfig.MAX_TARGET_FPS, 1)
                         .setValueFormatter(v -> Component.literal(v + " fps"))
                         .setDefaultValue(def.targetFps).setStorageHandler(storage)
                         .setEnabledProvider(s -> s.readBooleanOption(id("adaptive")), id("adaptive"))
@@ -64,7 +56,7 @@ public final class SodiumIntegration implements ConfigEntryPoint {
                 .setName(t("upscaling"))
                 .addOption(b.createIntegerOption(id("renderScale"))
                         .setName(t("renderScale")).setTooltip(tip("renderScale"))
-                        .setRange(50, 100, 5)
+                        .setRange(50, 100, 1)
                         .setValueFormatter(v -> Component.literal(v + "%"))
                         .setImpact(OptionImpact.HIGH)
                         .setDefaultValue((int) Math.round(def.renderScale * 100)).setStorageHandler(storage)
@@ -76,7 +68,7 @@ public final class SodiumIntegration implements ConfigEntryPoint {
                         .setBinding(v -> cfg.upscaler = v, () -> cfg.upscaler))
                 .addOption(b.createIntegerOption(id("upscaleSharpness"))
                         .setName(t("upscaleSharpness")).setTooltip(tip("upscaleSharpness"))
-                        .setRange(0, 100, 5)
+                        .setRange(0, 100, 1)
                         .setValueFormatter(v -> Component.literal(v + "%"))
                         .setDefaultValue((int) Math.round(def.upscaleSharpness * 100)).setStorageHandler(storage)
                         .setBinding(v -> cfg.upscaleSharpness = v / 100.0, () -> (int) Math.round(cfg.upscaleSharpness * 100)));
@@ -100,7 +92,7 @@ public final class SodiumIntegration implements ConfigEntryPoint {
                 .addOption(bool(b, storage, "motionBlur", def.motionBlur, v -> cfg.motionBlur = v, () -> cfg.motionBlur))
                 .addOption(b.createIntegerOption(id("motionBlurStrength"))
                         .setName(t("motionBlurStrength")).setTooltip(tip("motionBlurStrength"))
-                        .setRange(10, 100, 5)
+                        .setRange(10, 100, 1)
                         .setValueFormatter(v -> Component.literal(v + "%"))
                         .setDefaultValue(Math.round(def.motionBlurStrength * 100)).setStorageHandler(storage)
                         .setEnabledProvider(s -> s.readBooleanOption(id("motionBlur")), id("motionBlur"))
