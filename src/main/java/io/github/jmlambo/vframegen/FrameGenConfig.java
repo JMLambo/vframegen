@@ -59,6 +59,7 @@ public final class FrameGenConfig {
     public boolean debugCaptures = false;
     public boolean debugFrameLog = false;
     public boolean debugOpticalFlow = false;
+    public boolean opticalFlow = true;
     public boolean debugStatsLog = false;
     public boolean debugPacingLog = false;
     public boolean debugStallLog = false;
@@ -121,8 +122,10 @@ public final class FrameGenConfig {
             debugTint               tint generated frames magenta, to see which frames are generated.
             debugCaptures           F8 (or the controller button) saves the next frames as images.
             debugFrameLog           keep a log of the last ~10 s of presented frames; F8 saves it too.
-            debugOpticalFlow        NVIDIA RTX: measure motion with the GPU's optical flow hardware on every
-                                    real frame (not used for frames yet); F8 saves it as an image.
+            opticalFlow             NVIDIA RTX, interpolated mode: the GPU's optical flow hardware measures
+                                    motion between real frames, so generated frames also follow what depth
+                                    alone cannot (limbs, particles, water, animated textures).
+            debugOpticalFlow        measure optical flow even when it is not used; F8 saves it as an image.
             debugStatsLog           every 5 s, log frame rates, timings and why frames were skipped.
             debugPacingLog          every second, log how evenly frames reached the screen.
             debugStallLog           log a breakdown of every game loop that took over 35 ms.
@@ -173,6 +176,7 @@ public final class FrameGenConfig {
                 c.debugCaptures = bool(props, "debugCaptures", c.debugCaptures);
                 c.debugFrameLog = bool(props, "debugFrameLog", c.debugFrameLog);
                 c.debugOpticalFlow = bool(props, "debugOpticalFlow", c.debugOpticalFlow);
+                c.opticalFlow = bool(props, "opticalFlow", c.opticalFlow);
                 c.debugStatsLog = bool(props, "debugStatsLog", c.debugStatsLog);
                 c.debugPacingLog = bool(props, "debugPacingLog", c.debugPacingLog);
                 c.debugStallLog = bool(props, "debugStallLog", c.debugStallLog);
@@ -239,6 +243,7 @@ public final class FrameGenConfig {
         values.put("debugCaptures", Boolean.toString(debugCaptures));
         values.put("debugFrameLog", Boolean.toString(debugFrameLog));
         values.put("debugOpticalFlow", Boolean.toString(debugOpticalFlow));
+        values.put("opticalFlow", Boolean.toString(opticalFlow));
         values.put("debugStatsLog", Boolean.toString(debugStatsLog));
         values.put("debugPacingLog", Boolean.toString(debugPacingLog));
         values.put("debugStallLog", Boolean.toString(debugStallLog));

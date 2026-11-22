@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Hardware optical flow on NVIDIA RTX (20 series and newer, Vulkan): the GPU's optical flow unit
+  measures how the picture moved between the two real frames, and generated frames follow the part
+  depth reprojection cannot see (mob limbs, fire, particles, water, animated textures). Camera and
+  whole-entity motion still come from depth; the flow is used only where both directions agree and
+  it differs from depth by more than a couple of pixels. On by default where supported (setting
+  "Hardware optical flow", shown only on those GPUs); interpolated mode only. About 0.25 ms of
+  render-thread time per real frame.
 - Adaptive frame generation can go up to 8x (fixed multipliers stay at 2x to 6x), for very low
   real frame rates.
 - Adaptive mode asks for fewer generated frames whenever some get dropped (drawn, but no swapchain

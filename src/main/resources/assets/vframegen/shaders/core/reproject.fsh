@@ -29,6 +29,10 @@ uniform sampler2D MaskB;
 uniform sampler2D NoHandB;
 uniform sampler2D FinalB;
 uniform sampler2D TerrainB;
+// Hardware optical flow (NVIDIA), FlowParams.x: per pixel of A, where it went in B (FlowA), and per
+// pixel of B, where it was in A (FlowB). RG16 snorm; times FlowParams.zw it is a uv offset.
+uniform sampler2D FlowA;
+uniform sampler2D FlowB;
 #endif
 
 layout(std140) uniform FrameGen {
@@ -49,12 +53,18 @@ layout(std140) uniform FrameGen {
     // screen rectangle in the output), relative to its camera.
     vec4 EntA[128];
     vec4 EntB[128];
+    mat4 AToB;      // position relative to A's camera -> B clip (optical flow)
+    mat4 BToA;      // position relative to B's camera -> A clip
+    vec4 FlowParams; // x: optical flow on, y: trusted forward/backward disagreement (uv^2), zw: snorm -> uv
+    vec4 FlowLimits; // x: smallest residual used (pixels), y: largest
 };
 
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
 
 const int R_GUI = 1, R_HAND = 2, R_LOCKED = 3, R_HIT = 4, R_FILL = 5, R_PAST_HAND = 6, R_ROTATION = 7, R_OFFSCREEN = 8;
+
+const int R_FLOW = 9;
 
 struct Warp {
     vec3 color;
@@ -63,6 +73,7 @@ struct Warp {
     bool hit;      // a real match for this pixel (not a fill, not off screen)
     vec3 still;    // this source's world at the output pixel, not warped
     bool entity;   // the match is on a moving entity
+    bool flowed;   // optical flow moved the match (motion depth could not see)
 };
 
 bool isSky(float d) {
@@ -114,6 +125,31 @@ bool drawnByEntity(vec2 uv, float d, bool fromB) {
     return abs(texture(TerrainA, uv).r - d) > 1.0e-7;
 }
 
+#ifdef INTERPOLATE
+// Motion the depth warp cannot see (limbs, particles, water, animated textures), from the hardware
+// optical flow: where the flow says this source pixel is in the other frame, minus where depth
+// (camera and entity root motion) puts it, as a uv offset over the whole step to the other frame.
+// Zero where the forward and backward flows disagree (edges inside a 4x4 block, sky, smoke).
+vec2 flowResidual(vec2 uvSrc, vec3 pos, bool byEntity, bool fromB) {
+    if (FlowParams.x < 0.5) return vec2(0.0);
+    vec2 f = (fromB ? texture(FlowB, uvSrc).rg : texture(FlowA, uvSrc).rg) * FlowParams.zw;
+    vec2 back = (fromB ? texture(FlowA, uvSrc + f).rg : texture(FlowB, uvSrc + f).rg) * FlowParams.zw;
+    vec2 err = f + back;
+    if (dot(err, err) > FlowParams.y) return vec2(0.0);
+    // Entity root motion to the output frame covers a fraction of the step; over the whole step:
+    float frac = fromB ? 1.0 - Mix.x : Mix.x;
+    vec3 moved = byEntity ? pos + entityMotion(pos, fromB) / max(frac, 1.0e-3) : pos;
+    vec4 clip = (fromB ? BToA : AToB) * vec4(moved, 1.0);
+    if (clip.w <= 1.0e-6) return vec2(0.0);
+    vec2 predicted = (clip.xy / clip.w) * 0.5 + 0.5;
+    vec2 r = uvSrc + f - predicted;
+    // Small residuals are measurement noise; very large ones, a wrong match.
+    float px = length(r / Params2.zw);
+    if (px < FlowLimits.x || px > FlowLimits.y) return vec2(0.0);
+    return r;
+}
+#endif
+
 // Where a source pixel lands in the output. z is 0 when it lands behind the output camera (or the
 // depth unprojects to nothing): never a match.
 vec3 landingSpot(vec2 uvSrc, float depth, mat4 invViewProj, mat4 dstViewProj, bool fromB) {
@@ -121,10 +157,18 @@ vec3 landingSpot(vec2 uvSrc, float depth, mat4 invViewProj, mat4 dstViewProj, bo
     vec4 p = invViewProj * vec4(uvSrc * 2.0 - 1.0, ndcZ, 1.0);
     if (abs(p.w) < 1.0e-12) return vec3(-1.0, -1.0, 0.0);
     vec3 pos = p.xyz / p.w;
-    if (drawnByEntity(uvSrc, depth, fromB)) pos += entityMotion(pos, fromB);
+    bool byEntity = drawnByEntity(uvSrc, depth, fromB);
+#ifdef INTERPOLATE
+    vec2 residual = flowResidual(uvSrc, pos, byEntity, fromB);
+#endif
+    if (byEntity) pos += entityMotion(pos, fromB);
     vec4 clip = dstViewProj * vec4(pos, 1.0);
     if (clip.w <= 1.0e-6) return vec3(-1.0, -1.0, 0.0);
-    return vec3((clip.xy / clip.w) * 0.5 + 0.5, 1.0);
+    vec2 landed = (clip.xy / clip.w) * 0.5 + 0.5;
+#ifdef INTERPOLATE
+    landed += residual * (fromB ? 1.0 - Mix.x : Mix.x);
+#endif
+    return vec3(landed, 1.0);
 }
 
 // Held item, from the mask built once per real frame (lockmask.fsh).
@@ -164,6 +208,7 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
     w.near = -1.0;
     w.hit = true;
     w.entity = false;
+    w.flowed = false;
 
     // GUI / HUD: wherever the GUI changed the image, this source shows the GUI as it was.
     vec3 finalPx = texture(finalTex, uvDst).rgb;
@@ -252,6 +297,10 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
             if (!isSky(d)) {
                 float ndcZ = Params2.y > 0.5 ? d : d * 2.0 - 1.0;
                 vec4 p = invViewProj * vec4(uvSrc * 2.0 - 1.0, ndcZ, 1.0);
+#ifdef INTERPOLATE
+                w.flowed = abs(p.w) > 1.0e-12 && flowResidual(clamp(uvSrc, 0.0, 1.0), p.xyz / p.w,
+                        drawnByEntity(clamp(uvSrc, 0.0, 1.0), d, fromB), fromB) != vec2(0.0);
+#endif
                 w.entity = abs(p.w) > 1.0e-12 && drawnByEntity(clamp(uvSrc, 0.0, 1.0), d, fromB) && any(notEqual(entityMotion(p.xyz / p.w, fromB), vec3(0.0)));
             }
         }
@@ -305,9 +354,10 @@ vec3 debugColor(vec3 color, int reason) {
               : reason == R_PAST_HAND ? vec3(1.0, 0.6, 0.0)  // orange: stepped past the hand
               : reason == R_ROTATION ? vec3(0.0, 0.8, 0.8)   // cyan: rotation only
               : reason == R_OFFSCREEN ? vec3(1.0, 1.0, 0.0)  // yellow: off screen in source
+              : reason == R_FLOW ? vec3(1.0, 1.0, 1.0)       // white: moved by optical flow
               : vec3(0.5);                                   // grey: depth match
     float lum = dot(color, vec3(0.299, 0.587, 0.114));
-    return mix(vec3(lum * 0.6), tint, reason == R_HIT ? 0.0 : 0.55);
+    return mix(vec3(lum * 0.6), tint, reason == R_HIT ? 0.0 : reason == R_FLOW ? 0.7 : 0.55);
 }
 
 void main() {
@@ -347,7 +397,7 @@ void main() {
         Warp o = useB ? a : b;
         if (p.hit) {
             color = p.color;
-            reason = p.reason;
+            reason = p.flowed ? R_FLOW : p.reason;
         } else if (o.hit && !o.entity) {
             // (Not a moving entity from the other frame: its limbs are in another pose there, and
             // filling from it showed both sets of legs.)

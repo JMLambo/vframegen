@@ -76,7 +76,7 @@ public final class FrameGenerator {
      */
     private static final float LOCKED_DISTANCE = 0.2f;
     // + entity count, and per source FrameSlot.MAX_ENTITIES x (box min, box max, motion).
-    private static final int UBO_SIZE = 7 * 64 + 6 * 16 + 2 * FrameSlot.MAX_ENTITIES * 4 * 16;
+    private static final int UBO_SIZE = 7 * 64 + 6 * 16 + 2 * FrameSlot.MAX_ENTITIES * 4 * 16 + 2 * 64 + 2 * 16;
 
     /** What vanilla's blit + present show at the end of this loop. */
     public enum Present { VANILLA, HELD }
@@ -1235,6 +1235,16 @@ public final class FrameGenerator {
             ub.putVec4(countA, countB, a.hasTerrainDepth ? 1f : 0f, (b != null ? b : a).hasTerrainDepth ? 1f : 0f);
             putEntities(ub, a, b, t, dstViewProjRot, dstPos);
             putEntities(ub, b != null ? b : a, b != null ? a : null, 1f - t, dstViewProjRot, dstPos);
+            flow = b != null && VFrameGen.config().opticalFlow ? OpticalFlow.forPair(a.noHand, b.noHand) : null;
+            ub.putMat4f(otherViewProj(a, bb)).putMat4f(otherViewProj(bb, a));
+            float fw = OpticalFlow.SNORM_TO_PIXELS / a.noHand.getWidth(0), fh = OpticalFlow.SNORM_TO_PIXELS / a.noHand.getHeight(0);
+            // Forward and backward flow may disagree by a pixel (of the measured image) and still be trusted.
+            float trust = 1f / a.noHand.getWidth(0);
+            ub.putVec4(flow != null ? 1f : 0f, trust * trust, fw, fh);
+            // Measured with the camera turning and nothing else moving: below 2.5 pixels (or with the two
+            // directions more than a pixel apart) the flow moved 1-7% of the screen that depth already
+            // had right; above it, 0.05%, while burning mobs' fire was still followed.
+            ub.putVec4(2.5f, 48f, 0f, 0f);
             ByteBuffer data = ub.get();
             encoder.writeToBuffer(ubo.slice(), data);
         }
@@ -1245,7 +1255,12 @@ public final class FrameGenerator {
         try (RenderPass pass = encoder.createRenderPass(() -> "VFrameGen", outView, Optional.empty())) {
             pass.setPipeline(RenderSystem.getCompiledPipeline(pipeline(colorFormat, b != null)));
             bindSource(pass, "A", a, linear, nearest);
-            if (b != null) bindSource(pass, "B", b, linear, nearest);
+            if (b != null) {
+                bindSource(pass, "B", b, linear, nearest);
+                // Unused (FlowParams.x = 0) without a flow, but the pipeline still needs something bound.
+                pass.setUniform("FlowA", flow != null ? flow.backwardView : a.worldView, linear);
+                pass.setUniform("FlowB", flow != null ? flow.forwardView : a.worldView, linear);
+            }
             pass.setUniform("FrameGen", ubo);
             pass.draw(3, 1, 0, 0);
         }
@@ -1569,6 +1584,13 @@ public final class FrameGenerator {
                 a.m30() + (b.m30() - a.m30()) * t, a.m31() + (b.m31() - a.m31()) * t, a.m32() + (b.m32() - a.m32()) * t, a.m33() + (b.m33() - a.m33()) * t);
     }
 
+    /** Position relative to s's camera -> clip space of other (optical flow: where depth puts a pixel there). */
+    private static Matrix4f otherViewProj(FrameSlot s, FrameSlot other) {
+        return new Matrix4f(other.proj).mul(other.viewRot).translate(
+                (float) (s.pos.x - other.pos.x), (float) (s.pos.y - other.pos.y), (float) (s.pos.z - other.pos.z));
+    }
+
+    private OpticalFlow.Pair flow;
     private RenderPipeline pipeline(GpuFormat format, boolean interpolate) {
         String key = format.name() + (interpolate ? "_interpolate" : "");
         return pipelines.computeIfAbsent(key, k -> {
@@ -1577,6 +1599,10 @@ public final class FrameGenerator {
                 for (String tex : new String[]{"World", "Depth", "Mask", "NoHand", "Final", "Terrain"}) {
                     layout.withUniform(tex + id, UniformType.COMBINED_IMAGE_SAMPLER);
                 }
+            }
+            if (interpolate) {
+                layout.withUniform("FlowA", UniformType.COMBINED_IMAGE_SAMPLER);
+                layout.withUniform("FlowB", UniformType.COMBINED_IMAGE_SAMPLER);
             }
             layout.withUniform("FrameGen", UniformType.UNIFORM_BUFFER);
             RenderPipeline.Builder builder = RenderPipeline.builder()
@@ -1702,7 +1728,9 @@ public final class FrameGenerator {
         c.level = Minecraft.getInstance().level;
         c.hasFinal = false;
         c.valid = true;
-        if (VFrameGen.config().debugOpticalFlow) OpticalFlow.measure(c.noHand);
+        if (VFrameGen.config().debugOpticalFlow || (VFrameGen.config().opticalFlow && interpolated())) {
+            OpticalFlow.measure(c.noHand);
+        }
         buildMask(c);
         // With a shader pack the depth buffer has the water surface in it (see captureOpaqueDepth);
         // Iris keeps the depth from before translucents. Taken after buildMask, which needs the

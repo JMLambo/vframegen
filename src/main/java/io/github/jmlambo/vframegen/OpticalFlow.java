@@ -53,7 +53,8 @@ import java.util.List;
  * (VulkanPhysicalDeviceMixin, VulkanBackendMixin). Stage 2 (debugOpticalFlow): every real frame's
  * world image is copied into one of two input images, the hardware measures the motion from the
  * previous frame to this one, and the result is copied into a game texture ({@link #result()}) that
- * F8 saves. Not used for generated frames yet.
+ * F8 saves. Stage 3 (opticalFlow): generated frames between those two frames add the motion the
+ * flow saw and depth reprojection could not (reproject.fsh, flowResidual).
  *
  * <p>Order on the GPU, all on one timeline semaphore: the game's queue copies the frame in and
  * signals; the optical-flow queue waits, measures and signals; the game's queue waits and copies the
@@ -89,12 +90,28 @@ public final class OpticalFlow {
     private static int width, height;
     private static final long[] input = new long[2];
     private static final long[] inputMemory = new long[2];
-    private static long flow, flowMemory;
+    private static long flow, flowMemory;          // per pixel of the new frame: where it was in the old one
+    private static long backFlow, backFlowMemory;  // per pixel of the old frame: where it went in the new one
     private static final long[] session = new long[2]; // session[i]: input[i] against input[1 - i]
-    private static GpuTexture result;
+    /** The flow of one pair of real frames, copied into game textures (RG16 snorm). */
+    public static final class Pair {
+        public GpuTexture forward;  // at the newer frame, towards the older (FlowB)
+        public GpuTexture backward; // at the older frame, towards the newer (FlowA)
+        public com.mojang.renderpearl.api.textures.GpuTextureView forwardView, backwardView;
+        GpuTexture older, newer;    // the world images it was measured between
+        boolean valid;
+        boolean copied;             // copied out of the optical-flow images yet
+        long measuredValue;         // timeline value the measurement signals
+    }
+
+    // Generated frames of a pair may still be drawn after the next real frame was measured.
+    private static final Pair[] pairs = {new Pair(), new Pair(), new Pair()};
+    private static int nextPair;
+    private static Pair latest;
+    private static Pair pending; // measured, not copied out yet (the next measurement overwrites the images)
+    private static GpuTexture lastWorld;
     private static boolean layoutsSet;
     private static int current = -1; // input of the last frame, or -1 when there is none yet
-    private static boolean hasResult;
 
     private OpticalFlow() {
     }
@@ -111,10 +128,27 @@ public final class OpticalFlow {
         return queue != null && !failed;
     }
 
-    /** The last measured flow (RG16_SINT, x and y in 1/32 pixel, one per 4x4 pixels), or null. */
+    /** The last measured flow (forward), for F8, or null. */
     public static GpuTexture result() {
-        return hasResult ? result : null;
+        if (latest == null || !latest.valid) return null;
+        copyOut(latest);
+        return latest.copied ? latest.forward : null;
     }
+
+    /** The flow measured between these two world images (FrameSlot.noHand), or null. */
+    public static Pair forPair(GpuTexture older, GpuTexture newer) {
+        if (!available()) return null;
+        for (Pair p : pairs) {
+            if (p.valid && p.older == older && p.newer == newer) {
+                copyOut(p);
+                return p.copied ? p : null;
+            }
+        }
+        return null;
+    }
+
+    /** RG16 snorm to pixels: the flow is in 1/32 pixel (S10.5). */
+    public static final float SNORM_TO_PIXELS = 32767f / 32f;
 
     public static void init(VkDevice dev) {
         if (family < 0 || queue != null) return;
@@ -174,10 +208,12 @@ public final class OpticalFlow {
         int w = world.getWidth(0), h = world.getHeight(0);
         if (w < minWidth || h < minHeight || w > maxWidth || h > maxHeight) return;
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            if (w != width || h != height || result == null) {
+            if (w != width || h != height || flow == 0) {
                 destroyImages();
                 createImages(w, h, stack);
             }
+            // The images are about to be measured into again: keep what is still in them.
+            if (pending != null) copyOut(pending);
             int next = current < 0 ? 0 : 1 - current;
 
             // Game queue: copy the frame in (a blit converts the game's RGBA to the BGRA the hardware takes).
@@ -188,6 +224,7 @@ public final class OpticalFlow {
                 barrier(cb, stack, input[0], LAYOUT_UNDEFINED);
                 barrier(cb, stack, input[1], LAYOUT_UNDEFINED);
                 barrier(cb, stack, flow, LAYOUT_UNDEFINED);
+                barrier(cb, stack, backFlow, LAYOUT_UNDEFINED);
                 layoutsSet = true;
             }
             VulkanCommandEncoder.memoryBarrier(cb, stack);
@@ -202,8 +239,14 @@ public final class OpticalFlow {
             vk.execute(cb);
             long copied = ++timelineValue;
             vk.signalSemaphore(timeline, copied, STAGE_ALL);
+            // This image now holds a new frame: flows measured with its old contents no longer apply.
+            for (Pair p : pairs) if (p.older == world || p.newer == world) p.valid = false;
+            GpuTexture older = lastWorld;
+            lastWorld = world;
+            // Not submitted here (a submit costs the render thread about a millisecond): the copy goes
+            // with the game's next submission. The optical-flow queue's wait may be queued before
+            // that signal (timeline semaphores allow it).
             if (current < 0) {
-                encoder.submit();
                 current = next;
                 return;
             }
@@ -214,7 +257,6 @@ public final class OpticalFlow {
             // This buffer was last submitted commands.length measurements ago; wait until it finished.
             long earlier = timelineValue - 3L * commands.length;
             if (earlier > 0) waitTimeline(earlier, stack);
-            encoder.submit();
             VK12.vkResetCommandBuffer(of, 0);
             VK12.vkBeginCommandBuffer(of, VkCommandBufferBeginInfo.calloc(stack).sType$Default().flags(0x1));
             VulkanCommandEncoder.memoryBarrier(of, stack);
@@ -233,23 +275,61 @@ public final class OpticalFlow {
             check(KHRSynchronization2.vkQueueSubmit2KHR(queue, submit, 0L), "optical flow submit");
             current = next;
 
-            // Game queue: wait for the measurement and copy the flow into the game's texture.
+            // Game queue: wait for the measurement and copy the flows into the game's textures.
+            Pair pair = pairs[nextPair];
+            pair.valid = false;
+            nextPair = (nextPair + 1) % pairs.length;
+            int gw = (w + GRID - 1) / GRID, gh = (h + GRID - 1) / GRID;
+            if (pair.forward == null || pair.forward.getWidth(0) != gw || pair.forward.getHeight(0) != gh) {
+                if (pair.forward != null) {
+                    pair.forwardView.close();
+                    pair.backwardView.close();
+                    pair.forward.close();
+                    pair.backward.close();
+                }
+                pair.forward = flowTexture("forward", gw, gh);
+                pair.backward = flowTexture("backward", gw, gh);
+                pair.forwardView = RenderSystem.getDevice().createTextureView(pair.forward);
+                pair.backwardView = RenderSystem.getDevice().createTextureView(pair.backward);
+            }
+            // Copied out only when a generated frame first needs it (copyOut): waiting here put the
+            // whole measurement on the real frame's GPU time.
+            pair.measuredValue = measured;
+            pair.copied = false;
+            pending = pair;
+            pair.older = older;
+            pair.newer = world;
+            pair.valid = older != null;
+            latest = pair;
+        } catch (Throwable t) {
+            LOGGER.warn("Hardware optical flow failed, turned off", t);
+            failed = true;
+        }
+    }
+
+    /** Game queue: once the measurement is done, copy the flows into the pair's game textures. */
+    private static void copyOut(Pair pair) {
+        if (pair.copied || pair != pending || failed) return;
+        pending = null;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            int gw = pair.forward.getWidth(0), gh = pair.forward.getHeight(0);
             var out = RenderSystem.getDevice().createCommandEncoder();
             VulkanCommandEncoder vkOut = (VulkanCommandEncoder) ((FrontendCommandEncoder) out).backend();
-            vkOut.waitSemaphore(timeline, measured, STAGE_ALL);
+            vkOut.waitSemaphore(timeline, pair.measuredValue, STAGE_ALL);
             VkCommandBuffer copy = vkOut.allocateAndBeginTransientCommandBuffer();
             VulkanCommandEncoder.memoryBarrier(copy, stack);
             VkImageCopy.Buffer c = VkImageCopy.calloc(1, stack);
             c.srcSubresource().aspectMask(1).layerCount(1);
             c.dstSubresource().aspectMask(1).layerCount(1);
-            c.extent().set(result.getWidth(0), result.getHeight(0), 1);
-            VK12.vkCmdCopyImage(copy, flow, LAYOUT_GENERAL, ((VulkanGpuTexture) result).vkImage(), LAYOUT_GENERAL, c);
+            c.extent().set(gw, gh, 1);
+            VK12.vkCmdCopyImage(copy, flow, LAYOUT_GENERAL, ((VulkanGpuTexture) pair.forward).vkImage(), LAYOUT_GENERAL, c);
+            VK12.vkCmdCopyImage(copy, backFlow, LAYOUT_GENERAL, ((VulkanGpuTexture) pair.backward).vkImage(), LAYOUT_GENERAL, c);
             VulkanCommandEncoder.memoryBarrier(copy, stack);
             VK12.vkEndCommandBuffer(copy);
             vkOut.execute(copy);
             vkOut.signalSemaphore(timeline, ++timelineValue, STAGE_ALL);
-            out.submit();
-            hasResult = true;
+            // Goes with the generated frame's own submit.
+            pair.copied = true;
         } catch (Throwable t) {
             LOGGER.warn("Hardware optical flow failed, turned off", t);
             failed = true;
@@ -267,13 +347,17 @@ public final class OpticalFlow {
         flow = image(gw, gh, NVOpticalFlow.VK_FORMAT_R16G16_S10_5_NV, 0x1 | 0x8, // TRANSFER_SRC | STORAGE
                 NVOpticalFlow.VK_OPTICAL_FLOW_USAGE_OUTPUT_BIT_NV, stack);
         flowMemory = bind(flow, stack);
+        backFlow = image(gw, gh, NVOpticalFlow.VK_FORMAT_R16G16_S10_5_NV, 0x1 | 0x8,
+                NVOpticalFlow.VK_OPTICAL_FLOW_USAGE_OUTPUT_BIT_NV, stack);
+        backFlowMemory = bind(backFlow, stack);
         for (int i = 0; i < 2; i++) {
             VkOpticalFlowSessionCreateInfoNV info = VkOpticalFlowSessionCreateInfoNV.calloc(stack).sType$Default()
                     .width(w).height(h)
                     .imageFormat(FORMAT_INPUT)
                     .flowVectorFormat(NVOpticalFlow.VK_FORMAT_R16G16_S10_5_NV)
                     .outputGridSize(NVOpticalFlow.VK_OPTICAL_FLOW_GRID_SIZE_4X4_BIT_NV)
-                    .performanceLevel(NVOpticalFlow.VK_OPTICAL_FLOW_PERFORMANCE_LEVEL_FAST_NV);
+                    .performanceLevel(NVOpticalFlow.VK_OPTICAL_FLOW_PERFORMANCE_LEVEL_FAST_NV)
+                    .flags(NVOpticalFlow.VK_OPTICAL_FLOW_SESSION_CREATE_BOTH_DIRECTIONS_BIT_NV);
             LongBuffer handle = stack.mallocLong(1);
             check(NVOpticalFlow.vkCreateOpticalFlowSessionNV(device, info, null, handle), "session");
             session[i] = handle.get(0);
@@ -284,14 +368,21 @@ public final class OpticalFlow {
             check(NVOpticalFlow.vkBindOpticalFlowSessionImageNV(device, session[i],
                     NVOpticalFlow.VK_OPTICAL_FLOW_SESSION_BINDING_POINT_FLOW_VECTOR_NV,
                     view(flow, NVOpticalFlow.VK_FORMAT_R16G16_S10_5_NV, stack), LAYOUT_GENERAL), "bind flow");
+            check(NVOpticalFlow.vkBindOpticalFlowSessionImageNV(device, session[i],
+                    NVOpticalFlow.VK_OPTICAL_FLOW_SESSION_BINDING_POINT_BACKWARD_FLOW_VECTOR_NV,
+                    view(backFlow, NVOpticalFlow.VK_FORMAT_R16G16_S10_5_NV, stack), LAYOUT_GENERAL), "bind backward flow");
         }
-        result = RenderSystem.getDevice().createTexture("VFrameGen optical flow",
-                GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_COPY_SRC | GpuTexture.USAGE_TEXTURE_BINDING,
-                GpuFormat.RG16_SINT, gw, gh, 1, 1);
         layoutsSet = false;
         current = -1;
-        hasResult = false;
+        lastWorld = null;
         LOGGER.info("Hardware optical flow: measuring {}x{} frames, {}x{} vectors", w, h, gw, gh);
+    }
+
+    private static GpuTexture flowTexture(String name, int w, int h) {
+        // Same bits as the S10.5 flow; read as snorm so the shader can filter it.
+        return RenderSystem.getDevice().createTexture("VFrameGen optical flow " + name,
+                GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_COPY_SRC | GpuTexture.USAGE_TEXTURE_BINDING,
+                GpuFormat.RG16_SNORM, w, h, 1, 1);
     }
 
     private static final List<Long> views = new ArrayList<>();
@@ -343,6 +434,8 @@ public final class OpticalFlow {
     private static void destroyImages() {
         if (device == null) return;
         if (timelineValue > 0) {
+            // The last signals may still be waiting for the game's next submission: submit now.
+            RenderSystem.getDevice().createCommandEncoder().submit();
             try (MemoryStack stack = MemoryStack.stackPush()) {
                 waitTimeline(timelineValue, stack);
             }
@@ -360,10 +453,12 @@ public final class OpticalFlow {
         }
         if (flow != 0) VK12.vkDestroyImage(device, flow, null);
         if (flowMemory != 0) VK12.vkFreeMemory(device, flowMemory, null);
-        flow = flowMemory = 0;
-        if (result != null) result.close();
-        result = null;
-        hasResult = false;
+        if (backFlow != 0) VK12.vkDestroyImage(device, backFlow, null);
+        if (backFlowMemory != 0) VK12.vkFreeMemory(device, backFlowMemory, null);
+        flow = flowMemory = backFlow = backFlowMemory = 0;
+        for (Pair p : pairs) p.valid = false; // the textures are kept (resized when next used)
+        pending = null;
+        latest = null;
     }
 
     /** Waits (up to a second) until the GPU has reached value on the timeline. */

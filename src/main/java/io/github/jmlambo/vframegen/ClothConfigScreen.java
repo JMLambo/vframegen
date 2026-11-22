@@ -142,6 +142,12 @@ final class ClothConfigScreen {
                 .setTextGetter(v -> Component.literal(v + "%"))
                 .setRequirement(Requirement.isTrue(motionBlur))
                 .setSaveConsumer(v -> cfg.motionBlurStrength = v / 100f).build());
+        if (OpticalFlow.available()) {
+            // Only on GPUs with hardware optical flow (NVIDIA RTX 20 and newer, on Vulkan).
+            quality.addEntry(e.startBooleanToggle(t("opticalFlow"), cfg.opticalFlow)
+                    .setDefaultValue(def.opticalFlow).setTooltip(tip("opticalFlow"))
+                    .setSaveConsumer(v -> cfg.opticalFlow = v).build());
+        }
         quality.addEntry(e.startFloatField(t("guiDiffThreshold"), cfg.guiDiffThreshold)
                 .setDefaultValue(def.guiDiffThreshold).setMin(0).setMax(0.5f).setTooltip(tip("guiDiffThreshold"))
                 .setSaveConsumer(v -> cfg.guiDiffThreshold = v).build());
@@ -156,6 +162,11 @@ final class ClothConfigScreen {
         debug.addEntry(e.startBooleanToggle(t("debugFrameLog"), cfg.debugFrameLog)
                 .setDefaultValue(def.debugFrameLog).setTooltip(tip("debugFrameLog"))
                 .setSaveConsumer(v -> cfg.debugFrameLog = v).build());
+        if (OpticalFlow.available()) {
+            debug.addEntry(e.startBooleanToggle(t("debugOpticalFlow"), cfg.debugOpticalFlow)
+                    .setDefaultValue(def.debugOpticalFlow).setTooltip(tip("debugOpticalFlow"))
+                    .setSaveConsumer(v -> cfg.debugOpticalFlow = v).build());
+        }
         debug.addEntry(e.startBooleanToggle(t("debugStatsLog"), cfg.debugStatsLog)
                 .setDefaultValue(def.debugStatsLog).setTooltip(tip("debugStatsLog"))
                 .setSaveConsumer(v -> cfg.debugStatsLog = v).build());
