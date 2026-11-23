@@ -295,7 +295,8 @@ each run.
    ```
 
 The **Release** workflow checks that the tag matches `mod_version`, builds the mod, and publishes a
-GitHub Release with the jar and notes generated from the commits since the last release. A tag
+GitHub Release with the jar and the version's section of `CHANGELOG.md` as its notes (changes to the mod
+itself, so keep repo-only changes such as README, CI and templates out of it). A tag
 with a suffix (`v0.2.0-beta.1`) is marked as a pre-release.
 
 ## Contributing
