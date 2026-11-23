@@ -250,11 +250,12 @@ frames.
 
 ## Known issues
 
-- **OpenGL without Sodium: frame generation in interpolated mode fails.** The first generated frame
-  needs 14 texture slots (6 per real frame plus 2 for optical flow), and the game's own OpenGL
-  renderer only tracks 12 (Sodium raises that). VFrameGen switches itself off for the session, and
-  the game can then crash on the next text upload. It happens with or without Distant Horizons or
-  Iris, and not on Vulkan. Workaround: install Sodium, or use Vulkan. A fix is planned.
+- **OpenGL without Sodium: no optical flow, and render-scale frame generation draws at full
+  resolution.** The game's own OpenGL renderer lets a draw read only 12 textures (Sodium raises
+  that to 128). Optical flow needs 14 and drawing generated frames at the render scale needs 13, so
+  VFrameGen checks the limit and leaves them off by itself (the setting is greyed out with a
+  tooltip). Releases up to beta.5 failed on the first generated frame on this setup and could
+  crash the game.
 
 - Interpolation adds about one real frame of latency.
 - Hitches from Minecraft itself (chunk loading, shader-pack shadow rebuilds, Distant Horizons LOD

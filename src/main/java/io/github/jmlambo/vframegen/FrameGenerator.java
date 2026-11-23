@@ -332,6 +332,12 @@ public final class FrameGenerator {
     private void fail(RuntimeException e) {
         broken = true;
         invalidate();
+        // A draw that failed while binding textures leaves the game's OpenGL texture unit selected out of
+        // range, and the next texture upload of the game itself (text, say) crashed on it.
+        try {
+            if ("OpenGL".equalsIgnoreCase(backendName())) com.mojang.renderpearl.backend.opengl.GlStateManager._activeTexture(33984);
+        } catch (Throwable ignored) {
+        }
         VFrameGen.LOGGER.error("Frame generation failed and has been switched off for this session", e);
     }
 
@@ -1246,13 +1252,18 @@ public final class FrameGenerator {
     private void reprojectPass(CommandEncoder encoder, GpuTextureView target, int variant, FrameSlot a, FrameSlot b,
                                GpuSampler linear, GpuSampler nearest) {
         try (RenderPass pass = encoder.createRenderPass(() -> variant == 1 ? "VFrameGen (render scale)" : variant == 2 ? "VFrameGen (full-resolution GUI)" : "VFrameGen", target, Optional.empty())) {
-            pass.setPipeline(RenderSystem.getCompiledPipeline(pipeline(colorFormat, b != null, variant)));
+            // The flow textures only where they are used: the full-resolution pass after a render-scale frame
+            // never reads them, and without a flow they would only be placeholders (2 of the 12 slots
+            // the game's own OpenGL renderer has).
+            boolean flowTex = b != null && variant != 2 && flow != null;
+            pass.setPipeline(RenderSystem.getCompiledPipeline(pipeline(colorFormat, b != null, variant, flowTex)));
             bindSource(pass, "A", a, linear, nearest);
             if (b != null) {
                 bindSource(pass, "B", b, linear, nearest);
-                // Unused (FlowParams.x = 0) without a flow, but the pipeline still needs something bound.
-                pass.setUniform("FlowA", flow != null ? flow.backwardView : a.worldView, linear);
-                pass.setUniform("FlowB", flow != null ? flow.forwardView : a.worldView, linear);
+                if (flowTex) {
+                    pass.setUniform("FlowA", flow.backwardView, linear);
+                    pass.setUniform("FlowB", flow.forwardView, linear);
+                }
             }
             if (variant == 2) pass.setUniform("Upscaled", upView, nearest);
             pass.setUniform("FrameGen", ubo);
@@ -1268,8 +1279,11 @@ public final class FrameGenerator {
     private int lowW, lowH, upW, upH;
     private GpuFormat lowFormat;
 
-    private boolean generateAtRenderScale() {
+    private boolean generateAtRenderScale(boolean twoSources) {
         if (renderWidth >= width && renderHeight >= height) return false;
+        // With two real frames its last pass reads 13 textures, one more than the game's own OpenGL renderer has
+        // slots for (one real frame, low-latency mode: 7).
+        if (twoSources && !TextureSlots.fitsUpscaled()) return false;
         FrameGenConfig cfg = VFrameGen.config();
         return cfg.upscaler != FrameGenConfig.Upscaler.TEMPORAL
                 || cfg.generatedUpscaler != FrameGenConfig.GeneratedUpscaler.FULL_RESOLUTION;
@@ -1335,7 +1349,7 @@ public final class FrameGenerator {
         // Motion blur takes depth from the frame that builds most of the picture.
         genSrc = b != null && t >= 0.5f ? b : a;
         genPos.set(dstPos);
-        boolean lowRes = generateAtRenderScale();
+        boolean lowRes = generateAtRenderScale(b != null);
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
             Std140Builder ub = Std140Builder.onStack(stack, UBO_SIZE).putMat4f(dstInvViewProjRot);
@@ -1352,7 +1366,7 @@ public final class FrameGenerator {
             ub.putVec4(countA, countB, a.hasTerrainDepth ? 1f : 0f, (b != null ? b : a).hasTerrainDepth ? 1f : 0f);
             putEntities(ub, a, b, t, dstViewProjRot, dstPos);
             putEntities(ub, b != null ? b : a, b != null ? a : null, 1f - t, dstViewProjRot, dstPos);
-            flow = b != null && VFrameGen.config().opticalFlow ? flowFor(a, b) : null;
+            flow = b != null && VFrameGen.config().opticalFlow && TextureSlots.fitsFlow() ? flowFor(a, b) : null;
             ub.putMat4f(otherViewProj(a, bb)).putMat4f(otherViewProj(bb, a));
             // A flow texel times (fw, fh) is a uv offset.
             float fw = flow != null ? flow.pixelsPerUnit / flow.width : 0f, fh = flow != null ? flow.pixelsPerUnit / flow.height : 0f;
@@ -1724,8 +1738,8 @@ public final class FrameGenerator {
     private static OpticalFlow.Pair flowFor(FrameSlot a, FrameSlot b) {
         return useShaderFlow() ? ShaderFlow.forPair(a.noHand, b.noHand) : OpticalFlow.forPair(a.noHand, b.noHand);
     }
-    private RenderPipeline pipeline(GpuFormat format, boolean interpolate, int variant) {
-        String key = format.name() + (interpolate ? "_interpolate" : "") + (variant == 1 ? "_lowres" : variant == 2 ? "_composite" : "");
+    private RenderPipeline pipeline(GpuFormat format, boolean interpolate, int variant, boolean flowTex) {
+        String key = format.name() + (interpolate ? "_interpolate" : "") + (flowTex ? "_flow" : "") + (variant == 1 ? "_lowres" : variant == 2 ? "_composite" : "");
         return pipelines.computeIfAbsent(key, k -> {
             BindGroupLayout.Builder layout = BindGroupLayout.builder();
             for (String id : interpolate ? new String[]{"A", "B"} : new String[]{"A"}) {
@@ -1733,7 +1747,7 @@ public final class FrameGenerator {
                     layout.withUniform(tex + id, UniformType.COMBINED_IMAGE_SAMPLER);
                 }
             }
-            if (interpolate) {
+            if (interpolate && flowTex) {
                 layout.withUniform("FlowA", UniformType.COMBINED_IMAGE_SAMPLER);
                 layout.withUniform("FlowB", UniformType.COMBINED_IMAGE_SAMPLER);
             }
@@ -1747,6 +1761,7 @@ public final class FrameGenerator {
                     .withColorTargetState(new ColorTargetState(Optional.empty(), format, ColorTargetState.WRITE_ALL))
                     .withPrimitiveTopology(PrimitiveTopology.TRIANGLES);
             if (interpolate) builder.withShaderDefine("INTERPOLATE");
+            if (interpolate && flowTex) builder.withShaderDefine("FLOWTEX");
             if (variant == 1) builder.withShaderDefine("LOWRES");
             if (variant == 2) builder.withShaderDefine("COMPOSITE");
             return builder.build();
@@ -1865,7 +1880,7 @@ public final class FrameGenerator {
         c.hasFinal = false;
         c.valid = true;
         // Interpolated mode only: the flow is between two real frames, and only that mode has both.
-        if (interpolated() && (VFrameGen.config().opticalFlow || VFrameGen.config().debugOpticalFlow)) {
+        if (interpolated() && TextureSlots.fitsFlow() && (VFrameGen.config().opticalFlow || VFrameGen.config().debugOpticalFlow)) {
             if (useShaderFlow()) ShaderFlow.measure(c.noHand);
             else OpticalFlow.measure(c.noHand);
         }

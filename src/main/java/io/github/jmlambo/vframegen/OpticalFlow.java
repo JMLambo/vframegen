@@ -129,11 +129,12 @@ public final class OpticalFlow {
 
     /** Whether optical flow can run at all: on the hardware, or else as shaders (ShaderFlow). */
     public static boolean usable() {
-        return available() || ShaderFlow.available();
+        return (available() || ShaderFlow.available()) && TextureSlots.fitsFlow();
     }
 
     /** The setting's tooltip (without the ".tooltip" suffix): which kind this GPU uses. */
     public static String settingTooltipKey() {
+        if (!TextureSlots.fitsFlow()) return "opticalFlow.slots";
         return available() ? "opticalFlow" : ShaderFlow.available() ? "opticalFlow.shader" : "opticalFlow.unsupported";
     }
 
