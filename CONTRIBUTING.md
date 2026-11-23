@@ -29,6 +29,10 @@ Use the **Bug report** issue form. Before you file:
   other mods), with frame generation on and off.
 - `./gradlew build` must pass; GitHub Actions builds every pull request.
 - Code that runs every frame should not allocate or log unless a Debug option is on.
+- Say in the description whether AI wrote any of it (the **AI use** boxes in the template). AI-generated
+  changes are welcome, but they must be thoroughly tested in game before you open the pull request;
+  human-made ones are welcome too. A check asks pull requests from contributors to answer this: it
+  only checks that you did, not whether it is true.
 
 ## Branch rules
 
