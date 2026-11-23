@@ -171,6 +171,10 @@ Frame generation makes motion smoother; it does not make the game itself run fas
   - On **Vulkan**, Distant Horizons works with or without Sodium, but not together with the
     official Iris: Distant Horizons switches itself to OpenGL to work with Iris, then refuses to run
     on Vulkan. Use OpenGL, or an Iris build with Vulkan support.
+- **Voxy**: works on OpenGL with shaders off (tested with Voxy 0.2.20-beta, with Voxy Extra and
+  Voxygen, at 100% and 67% render scale). With a shader pack on, Voxy 0.2.20-beta itself crashes
+  with the official Iris 1.11.7 (inside Voxy's own Iris support), which VFrameGen can't change.
+  Voxy only supports OpenGL.
 - **Controlify**: optional. It adds controller bindings for the toggle and the debug capture.
 - **Reflex**: works with the present thread, and recommended: it noticeably cuts input lag with
   frame generation on.
