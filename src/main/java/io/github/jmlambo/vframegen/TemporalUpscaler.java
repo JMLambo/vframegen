@@ -293,11 +293,6 @@ public final class TemporalUpscaler {
         }
     }
 
-    /** The resolved texture (after {@link #resolve} returned non-null). */
-    public static GpuTexture resolvedTexture() {
-        return history[current];
-    }
-
     private static float ndcDepth(Matrix4f proj, float distance) {
         Vector4f v = proj.transform(new Vector4f(0f, 0f, -distance, 1f));
         return v.z / v.w;

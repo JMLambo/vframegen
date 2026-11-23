@@ -60,9 +60,6 @@ public final class PresentQueue {
     private static final long STAGE_TRANSFER = 0x1000L;       // VK_PIPELINE_STAGE_2_TRANSFER_BIT
     private static final long STAGE_ALL = 0x10000L;           // VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT
     private static final long ACCESS_TRANSFER_WRITE = 0x1000L;
-    private static final long ACCESS_TRANSFER_READ = 0x800L;
-    private static final long ACCESS_MEMORY_READ = 0x8000L;
-    private static final long ACCESS_MEMORY_WRITE = 0x10000L;
 
     // Chosen when the physical device is set up (VulkanPhysicalDeviceMixin), before the device.
     private static int plannedFamily = -1;
