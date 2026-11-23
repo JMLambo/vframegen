@@ -171,8 +171,6 @@ Frame generation makes motion smoother; it does not make the game itself run fas
   - On **Vulkan**, Distant Horizons works with or without Sodium, but not together with the
     official Iris: Distant Horizons switches itself to OpenGL to work with Iris, then refuses to run
     on Vulkan. Use OpenGL, or an Iris build with Vulkan support.
-  - On **OpenGL without Sodium**, Distant Horizons 3.3.4 with frame generation on currently crashes
-    the game within a minute or so (see Known issues). Use it with Sodium, or on Vulkan.
 - **Controlify**: optional. It adds controller bindings for the toggle and the debug capture.
 - **Reflex**: works with the present thread, and recommended: it noticeably cuts input lag with
   frame generation on.
@@ -252,10 +250,11 @@ frames.
 
 ## Known issues
 
-- **Distant Horizons without Sodium on OpenGL crashes with frame generation on** (an out-of-range
-  OpenGL texture unit while the game bakes text; it does not happen with frame generation off, or
-  with Sodium, or on Vulkan). Found with Distant Horizons 3.3.4. Workaround: install Sodium, or
-  use Vulkan.
+- **OpenGL without Sodium: frame generation in interpolated mode fails.** The first generated frame
+  needs 14 texture slots (6 per real frame plus 2 for optical flow), and the game's own OpenGL
+  renderer only tracks 12 (Sodium raises that). VFrameGen switches itself off for the session, and
+  the game can then crash on the next text upload. It happens with or without Distant Horizons or
+  Iris, and not on Vulkan. Workaround: install Sodium, or use Vulkan. A fix is planned.
 
 - Interpolation adds about one real frame of latency.
 - Hitches from Minecraft itself (chunk loading, shader-pack shadow rebuilds, Distant Horizons LOD
