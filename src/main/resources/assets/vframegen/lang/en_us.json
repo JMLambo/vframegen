@@ -64,6 +64,7 @@
   "vframegen.config.opticalFlow": "Optical flow (beta)",
   "vframegen.config.opticalFlow.tooltip": "Beta. Measures how the picture moved between real frames, so generated frames also follow what depth alone can't predict: mob limbs, fire, particles, water and animated textures. This GPU uses its optical flow hardware (NVIDIA RTX). Interpolated mode only. Costs about a quarter of a millisecond per frame.",
   "vframegen.config.opticalFlow.shader.tooltip": "Beta, experimental on this GPU. Measures how the picture moved between real frames, so generated frames also follow what depth alone can't predict: mob limbs, fire, particles, water and animated textures. Without optical flow hardware (AMD, Intel, or NVIDIA on OpenGL) it is measured with shaders: less precise than NVIDIA's hardware, and it costs some GPU time (it measures at a lower resolution on slower GPUs). Interpolated mode only. Turn it off if generated frames look wrong.",
+  "vframegen.config.opticalFlow.slots.tooltip": "Not available: this OpenGL setup lets a draw read only 12 textures, and optical flow needs 14. Installing Sodium, or using the Vulkan backend, makes it available.",
   "vframegen.config.opticalFlow.unsupported.tooltip": "Not available: the optical flow shaders could not run on this GPU.",
   "vframegen.config.motionBlur": "Motion blur",
   "vframegen.packBlur.title": "Shader pack motion blur is on",

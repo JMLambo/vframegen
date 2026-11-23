@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Fixed frame generation failing on the first generated frame (and the game then crashing) on OpenGL
+  without Sodium. The game's own OpenGL renderer lets a draw read only 12 textures, and a generated
+  frame read 14. VFrameGen now checks the limit: without enough slots, optical flow and drawing
+  generated frames at the render scale are left off by themselves, and a failure can no longer crash
+  the game afterwards. Sodium raises the limit, so nothing changes with Sodium installed, or on
+  Vulkan.
 - Fixed a crash on joining a world with the official Iris release and shaders off ("Use of a disposed
   LocalRef").
 

@@ -31,8 +31,10 @@ uniform sampler2D FinalB;
 uniform sampler2D TerrainB;
 // Hardware optical flow (NVIDIA), FlowParams.x: per pixel of A, where it went in B (FlowA), and per
 // pixel of B, where it was in A (FlowB). RG16 snorm; times FlowParams.zw it is a uv offset.
+#ifdef FLOWTEX
 uniform sampler2D FlowA;
 uniform sampler2D FlowB;
+#endif
 #endif
 
 layout(std140) uniform FrameGen {
@@ -142,6 +144,10 @@ bool offscreen(vec2 uv);
 // (camera and entity root motion) puts it, as a uv offset over the whole step to the other frame.
 // Zero where the forward and backward flows disagree (edges inside a 4x4 block, sky, smoke).
 vec2 flowResidual(vec2 uvSrc, vec3 pos, bool byEntity, bool fromB) {
+#ifndef FLOWTEX
+    // Without the flow textures (a draw reads at most 12 on the game's own OpenGL renderer).
+    return vec2(0.0);
+#else
     if (FlowParams.x < 0.5) return vec2(0.0);
     vec2 f = (fromB ? texture(FlowB, uvSrc).rg : texture(FlowA, uvSrc).rg) * FlowParams.zw;
     // Off the image the reverse lookup would read an edge texel instead: not verifiable.
@@ -161,6 +167,7 @@ vec2 flowResidual(vec2 uvSrc, vec3 pos, bool byEntity, bool fromB) {
     float px = length(r / Params2.zw);
     if (px < FlowLimits.x || px > FlowLimits.y) return vec2(0.0);
     return r;
+#endif
 }
 #endif
 
