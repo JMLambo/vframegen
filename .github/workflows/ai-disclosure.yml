@@ -1,0 +1,36 @@
+name: AI disclosure
+
+# Asks contributors to say whether AI wrote their pull request, and to tick "Tested in game" when it
+# did. It checks that the question was answered, not whether the answer is true (AI code detectors
+# are unreliable). The maintainer and bots are exempt. It is not a required check in the main
+# ruleset, so it never blocks a merge by itself.
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  ai-disclosure:
+    if: github.actor != github.repository_owner && !endsWith(github.actor, '[bot]')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the pull request says whether AI was used
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          body=$(printf '%s' "${BODY}" | tr -d '\r')
+          ticked=$(printf '%s\n' "${body}" | grep -cE '^[[:space:]]*- \[[xX]\] (None|Some|Most)' || true)
+          if [ "${ticked}" -ne 1 ]; then
+            echo "::error::Tick exactly one box under \"AI use\" in the pull request description (None, Some or Most)."
+            exit 1
+          fi
+          if printf '%s\n' "${body}" | grep -qE '^[[:space:]]*- \[[xX]\] (Some|Most)'; then
+            if ! printf '%s\n' "${body}" | grep -qE '^[[:space:]]*- \[[xX]\] Tested in game'; then
+              echo "::error::AI helped with this change: please test it in game and tick \"Tested in game\"."
+              exit 1
+            fi
+          fi
+          echo "AI use is declared."
