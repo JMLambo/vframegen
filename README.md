@@ -40,8 +40,12 @@ pacing.
    settings), [Mod Menu](https://modrinth.com/mod/modmenu) and
    [Cloth Config](https://modrinth.com/mod/cloth-config) for the full settings screen, and
    [Controlify](https://modrinth.com/mod/controlify) for controller bindings.
-4. In game, select **Video Settings → Graphics Backend → Vulkan** for the best pacing, turn
-   **VSync off**, and press **F9** to toggle frame generation.
+4. In game, open **Video Settings → Graphics Backend** and select **Vulkan**, which gives the best
+   experience (the most exact frame pacing, and everything works). **OpenGL** works too: use it if
+   you run an Iris shader pack (official Iris only supports OpenGL) or if Vulkan doesn't work on your
+   PC. On OpenGL the pacing is a little less exact, and without Sodium optical flow is not available
+   (see [Compatibility](#compatibility)).
+5. Turn **VSync off**, and press **F9** to toggle frame generation.
 
 On the first launch, VFrameGen measures your PC for a few seconds in the first world you join and
 picks a [preset](#presets) and a target frame rate (your display's refresh rate). A message says
