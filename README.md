@@ -254,8 +254,8 @@ frames.
 
 - **Distant Horizons without Sodium on OpenGL crashes with frame generation on** (an out-of-range
   OpenGL texture unit while the game bakes text; it does not happen with frame generation off, or
-  with Sodium, or on Vulkan). Found while testing Distant Horizons 3.3.4; it is not new in
-  the latest release. Workaround: install Sodium, or use Vulkan.
+  with Sodium, or on Vulkan). Found with Distant Horizons 3.3.4. Workaround: install Sodium, or
+  use Vulkan.
 
 - Interpolation adds about one real frame of latency.
 - Hitches from Minecraft itself (chunk loading, shader-pack shadow rebuilds, Distant Horizons LOD
