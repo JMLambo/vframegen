@@ -8,7 +8,7 @@ import java.lang.reflect.Field;
  * (renderpearl's GlStateManager.TEXTURES) and fails with an ArrayIndexOutOfBoundsException on a
  * 13th; Sodium and Iris raise it. Other backends have no such table. A generated frame reads 12
  * textures (6 per real frame), 14 with optical flow, and 13 for the full-resolution pass on top of a
- * frame drawn at the render scale.
+ * frame drawn at the render scale (interpolation only: with one real frame, low-latency mode, it is 7).
  */
 public final class TextureSlots {
     /** Two real frames: world, depth, hand mask, world without the hand, final, terrain depth, each. */

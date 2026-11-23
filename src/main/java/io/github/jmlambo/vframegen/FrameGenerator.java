@@ -1279,9 +1279,11 @@ public final class FrameGenerator {
     private int lowW, lowH, upW, upH;
     private GpuFormat lowFormat;
 
-    private boolean generateAtRenderScale() {
+    private boolean generateAtRenderScale(boolean twoSources) {
         if (renderWidth >= width && renderHeight >= height) return false;
-        if (!TextureSlots.fitsUpscaled()) return false; // its last pass reads one more texture than the game's own OpenGL renderer has slots for
+        // With two real frames its last pass reads 13 textures, one more than the game's own OpenGL renderer has
+        // slots for (one real frame, low-latency mode: 7).
+        if (twoSources && !TextureSlots.fitsUpscaled()) return false;
         FrameGenConfig cfg = VFrameGen.config();
         return cfg.upscaler != FrameGenConfig.Upscaler.TEMPORAL
                 || cfg.generatedUpscaler != FrameGenConfig.GeneratedUpscaler.FULL_RESOLUTION;
@@ -1347,7 +1349,7 @@ public final class FrameGenerator {
         // Motion blur takes depth from the frame that builds most of the picture.
         genSrc = b != null && t >= 0.5f ? b : a;
         genPos.set(dstPos);
-        boolean lowRes = generateAtRenderScale();
+        boolean lowRes = generateAtRenderScale(b != null);
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
             Std140Builder ub = Std140Builder.onStack(stack, UBO_SIZE).putMat4f(dstInvViewProjRot);
