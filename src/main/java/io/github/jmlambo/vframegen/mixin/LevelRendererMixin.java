@@ -33,7 +33,12 @@ import java.util.OptionalDouble;
  * opaque world, where nothing can be copied: they are moved into a pass of their own, right after
  * it, with the same targets and state, and the depth is copied in between.
  */
-@Mixin(LevelRenderer.class)
+// Priority below the default (1000): applied first, so our wrappers sit inside other mods' wrappers
+// of the same calls. The deferred calls below keep the Operation they get and call it after the
+// handler returned; outside Iris's beginTranslucents wrapper that Operation was Iris's, whose
+// @Local reference is gone by then ("Use of a disposed LocalRef", crash on joining a world with the
+// official Iris and shaders off). Inside it, the Operation is the plain vanilla call.
+@Mixin(value = LevelRenderer.class, priority = 500)
 public abstract class LevelRendererMixin implements DeferredSolidAccess {
     @Shadow
     @Final
