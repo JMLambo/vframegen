@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.0-beta.6
+
 - Fixed frame generation failing on the first generated frame (and the game then crashing) on OpenGL
   without Sodium. The game's own OpenGL renderer lets a draw read only 12 textures, and a generated
   frame read 14. VFrameGen now checks the limit: without enough slots, optical flow and drawing
