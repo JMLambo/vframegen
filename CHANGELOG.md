@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fixed a crash on joining a world with the official Iris release and shaders off ("Use of a disposed
+  LocalRef").
+
 ## 1.0.0-beta.5
 
 - Coming up: better compatibility with other mods will be the main focus of the next few betas,
