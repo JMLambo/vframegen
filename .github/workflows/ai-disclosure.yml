@@ -24,12 +24,14 @@ jobs:
           BODY: ${{ github.event.pull_request.body }}
         run: |
           body=$(printf '%s' "${BODY}" | tr -d '\r')
-          ticked=$(printf '%s\n' "${body}" | grep -cE '^[[:space:]]*- \[[xX]\] (None|Some|Most)' || true)
+          # Only the "AI use" section counts: other checklists may reuse those words.
+          section=$(printf '%s\n' "${body}" | awk '/^##[[:space:]]+AI use/ {f=1; next} /^##[[:space:]]/ {f=0} f')
+          ticked=$(printf '%s\n' "${section}" | grep -cE '^[[:space:]]*- \[[xX]\] (None|Some|Most)' || true)
           if [ "${ticked}" -ne 1 ]; then
             echo "::error::Tick exactly one box under \"AI use\" in the pull request description (None, Some or Most)."
             exit 1
           fi
-          if printf '%s\n' "${body}" | grep -qE '^[[:space:]]*- \[[xX]\] (Some|Most)'; then
+          if printf '%s\n' "${section}" | grep -qE '^[[:space:]]*- \[[xX]\] (Some|Most)'; then
             if ! printf '%s\n' "${body}" | grep -qE '^[[:space:]]*- \[[xX]\] Tested in game'; then
               echo "::error::AI helped with this change: please test it in game and tick \"Tested in game\"."
               exit 1
