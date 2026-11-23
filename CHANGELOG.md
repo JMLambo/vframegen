@@ -24,8 +24,6 @@
   frames (same upscaler, sharpening and anti-aliasing), with the GUI and held item kept at full
   resolution. With the Temporal upscaler, which generated frames can't use, the new
   "Generated-frame upscaler" setting picks Full resolution, Bicubic or Edge-adaptive.
-- README: on integrated graphics, use only upscaling and anti-aliasing (frame generation costs
-  almost as much as a real frame there).
 - Adaptive mode keeps generated frames within a share of the GPU's time. On GPUs where a generated
   frame is expensive (a laptop iGPU at 1080p), asking for more of them to reach the target slowed
   the real frames, which then asked for even more: real fps could fall from 60 to 15.
@@ -62,8 +60,6 @@
 - Fixed input lag and the game slowing down and catching up in waves with the present queue: frames
   could queue two or three real frames deep. The queue is now kept about one real frame deep
   (generated frames beyond that are not drawn), which also gave real frames their GPU time back.
-- README: "What to expect" (real frame rate cost, adaptive targets, input delay, upscaling with
-  shader packs).
 
 - Generated frames no longer go missing with a GPU-heavy shader pack on Vulkan (NVIDIA): each one
   now takes a swapchain image only when it is due, on a second queue of its own, instead of holding

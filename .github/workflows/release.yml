@@ -67,9 +67,26 @@ jobs:
         run: |
           prerelease=""
           case "${TAG}" in *-*) prerelease="--prerelease" ;; esac
+          # The notes are this version's CHANGELOG.md section, which lists changes to the mod itself
+          # (GitHub's generated notes list every merged pull request, README and CI changes included),
+          # and a link to the full comparison with the previous release.
+          version="${TAG#v}"
+          awk -v v="${version}" '
+            { l = $0; gsub(/\t/, " ", l) }
+            l ~ /^ ? ? ?```/ { fence = !fence } # up to 3 spaces: more is indented code, not a fence
+            !fence && l ~ /^## / { if (f) exit; h = l; sub(/^## +\[?/, "", h); sub(/[] ].*$/, "", h); if (h == v) f = 1; next }
+            f' CHANGELOG.md > "${RUNNER_TEMP}/notes.md"
+          prev=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
+          if grep -q '[^[:space:]]' "${RUNNER_TEMP}/notes.md"; then
+            [ -z "${prev}" ] || printf '\n**Full Changelog**: https://github.com/%s/compare/%s...%s\n' \
+              "${GITHUB_REPOSITORY}" "${prev}" "${TAG}" >> "${RUNNER_TEMP}/notes.md"
+            notes="--notes-file ${RUNNER_TEMP}/notes.md"
+          else
+            notes="--generate-notes" # no CHANGELOG section for this version
+          fi
           gh release create "${TAG}" build/libs/*.jar \
             --title "VFrameGen ${TAG#v}" \
-            --generate-notes --verify-tag ${prerelease}
+            ${notes} --verify-tag ${prerelease}
 
       - name: Upload to CurseForge
         env:
@@ -102,8 +119,9 @@ jobs:
 
           # This version's CHANGELOG.md section (between its heading and the next one).
           changelog=$(awk -v v="${version}" '
-            $0 ~ "^## \\[?" v "([] ]|$)" { f = 1; next }
-            /^## / { if (f) exit }
+            { l = $0; gsub(/\t/, " ", l) }
+            l ~ /^ ? ? ?```/ { fence = !fence } # up to 3 spaces: more is indented code, not a fence
+            !fence && l ~ /^## / { if (f) exit; h = l; sub(/^## +\[?/, "", h); sub(/[] ].*$/, "", h); if (h == v) f = 1; next }
             f' CHANGELOG.md)
           [ -n "${changelog}" ] || changelog="See https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
 
