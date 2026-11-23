@@ -160,11 +160,19 @@ Frame generation makes motion smoother; it does not make the game itself run fas
 
 ## Compatibility
 
-- **Sodium**: works.
-- **Iris**: works with shader packs (tested with Complementary + Euphoria Patches). Depth
-  reprojection works with packs. The held item is masked by depth, because packs draw it
-  themselves.
-- **Distant Horizons**: works. LOD terrain reprojects with its depth.
+- **Sodium**: works (tested with 0.9.2 and 0.9.3).
+- **Iris**: works with shader packs on OpenGL (tested with Complementary + Euphoria Patches and Mellow;
+  official Iris 1.11.7 and a local 1.12 build). Depth reprojection works with packs. The held item is
+  masked by depth, because packs draw it themselves. Official Iris releases only support OpenGL: on
+  Vulkan, shader packs need an Iris build with Vulkan support. With shaders off, the official Iris
+  runs fine on both.
+- **Distant Horizons**: works. LOD terrain reprojects with its depth (tested with 3.3.4, the
+  official release, and 3.4.0 RC2). A few things to know:
+  - On **Vulkan**, Distant Horizons works with or without Sodium, but not together with the
+    official Iris: Distant Horizons switches itself to OpenGL to work with Iris, then refuses to run
+    on Vulkan. Use OpenGL, or an Iris build with Vulkan support.
+  - On **OpenGL without Sodium**, Distant Horizons 3.3.4 with frame generation on currently crashes
+    the game within a minute or so (see Known issues). Use it with Sodium, or on Vulkan.
 - **Controlify**: optional. It adds controller bindings for the toggle and the debug capture.
 - **Reflex**: works with the present thread, and recommended: it noticeably cuts input lag with
   frame generation on.
@@ -243,6 +251,11 @@ frames.
   Horizons' CPU load, and a low-pause collector (`-XX:+UseZGC`) all help.
 
 ## Known issues
+
+- **Distant Horizons without Sodium on OpenGL crashes with frame generation on** (an out-of-range
+  OpenGL texture unit while the game bakes text; it does not happen with frame generation off, or
+  with Sodium, or on Vulkan). Found while testing Distant Horizons 3.3.4; it is not new in
+  the latest release. Workaround: install Sodium, or use Vulkan.
 
 - Interpolation adds about one real frame of latency.
 - Hitches from Minecraft itself (chunk loading, shader-pack shadow rebuilds, Distant Horizons LOD
