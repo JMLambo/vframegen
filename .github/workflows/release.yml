@@ -72,7 +72,8 @@ jobs:
           # and a link to the full comparison with the previous release.
           version="${TAG#v}"
           awk -v v="${version}" '
-            /^## / { if (f) exit; h = $0; sub(/^## \[?/, "", h); sub(/[] ].*$/, "", h); sub(/\t.*$/, "", h); if (h == v) f = 1; next }
+            { l = $0; gsub(/\t/, " ", l) }
+            l ~ /^## / { if (f) exit; h = l; sub(/^## +\[?/, "", h); sub(/[] ].*$/, "", h); if (h == v) f = 1; next }
             f' CHANGELOG.md > "${RUNNER_TEMP}/notes.md"
           prev=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
           if grep -q '[^[:space:]]' "${RUNNER_TEMP}/notes.md"; then
@@ -117,7 +118,8 @@ jobs:
 
           # This version's CHANGELOG.md section (between its heading and the next one).
           changelog=$(awk -v v="${version}" '
-            /^## / { if (f) exit; h = $0; sub(/^## \[?/, "", h); sub(/[] ].*$/, "", h); sub(/\t.*$/, "", h); if (h == v) f = 1; next }
+            { l = $0; gsub(/\t/, " ", l) }
+            l ~ /^## / { if (f) exit; h = l; sub(/^## +\[?/, "", h); sub(/[] ].*$/, "", h); if (h == v) f = 1; next }
             f' CHANGELOG.md)
           [ -n "${changelog}" ] || changelog="See https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
 
