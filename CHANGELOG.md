@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.0-beta.7
+
 - More real fps with frame generation on a GPU that is already busy. The auto frame cap lowered the
   real frame rate whenever generated frames came out off time, and kept lowering it, down to half,
   even when that didn't help (the GPU, not the cap, was the limit). It now checks each step down,
