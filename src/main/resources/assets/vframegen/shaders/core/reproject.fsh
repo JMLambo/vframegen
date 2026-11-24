@@ -143,7 +143,23 @@ bool offscreen(vec2 uv);
 // optical flow: where the flow says this source pixel is in the other frame, minus where depth
 // (camera and entity root motion) puts it, as a uv offset over the whole step to the other frame.
 // Zero where the forward and backward flows disagree (edges inside a 4x4 block, sky, smoke).
-vec2 flowResidual(vec2 uvSrc, vec3 pos, bool byEntity, bool fromB) {
+// Whether the flow block around uvSrc straddles a depth edge (a near object against what is behind
+// it). The flow is one vector per 4x4 block, matched on the image: there it mixes the two motions and
+// drags the edge. Depth already moves the edge right for terrain (only the camera moved it).
+bool flowBlockOnDepthEdge(sampler2D depthTex, vec2 uvSrc) {
+    vec2 o = 1.5 * 4.0 / FlowLimits.zw; // a block and a half of the measured image, in uv
+    float c = nearness(texture(depthTex, uvSrc).r);
+    float lo = c, hi = c;
+    for (int i = 0; i < 4; i++) {
+        vec2 dir = i == 0 ? vec2(o.x, 0.0) : i == 1 ? vec2(-o.x, 0.0) : i == 2 ? vec2(0.0, o.y) : vec2(0.0, -o.y);
+        float n = nearness(texture(depthTex, clamp(uvSrc + dir, 0.0, 1.0)).r);
+        lo = min(lo, n); hi = max(hi, n);
+    }
+    // nearness is about 1/distance: more than 1.25x apart in distance (sky: 0, always an edge).
+    return hi > lo * 1.25;
+}
+
+vec2 flowResidual(sampler2D depthTex, vec2 uvSrc, vec3 pos, bool byEntity, bool fromB) {
 #ifndef FLOWTEX
     // Without the flow textures (a draw reads at most 12 on the game's own OpenGL renderer).
     return vec2(0.0);
@@ -166,6 +182,9 @@ vec2 flowResidual(vec2 uvSrc, vec3 pos, bool byEntity, bool fromB) {
     // Small residuals are measurement noise; very large ones, a wrong match.
     float px = length(r / Params2.zw);
     if (px < FlowLimits.x || px > FlowLimits.y) return vec2(0.0);
+    // Last, as the dearest test (5 depth reads). Entities keep it at their edges: their limbs are
+    // what the flow is for.
+    if (!byEntity && flowBlockOnDepthEdge(depthTex, uvSrc)) return vec2(0.0);
     return r;
 #endif
 }
@@ -173,14 +192,14 @@ vec2 flowResidual(vec2 uvSrc, vec3 pos, bool byEntity, bool fromB) {
 
 // Where a source pixel lands in the output. z is 0 when it lands behind the output camera (or the
 // depth unprojects to nothing): never a match.
-vec3 landingSpot(vec2 uvSrc, float depth, mat4 invViewProj, mat4 dstViewProj, bool fromB) {
+vec3 landingSpot(sampler2D depthTex, vec2 uvSrc, float depth, mat4 invViewProj, mat4 dstViewProj, bool fromB) {
     float ndcZ = Params2.y > 0.5 ? depth : depth * 2.0 - 1.0;
     vec4 p = invViewProj * vec4(uvSrc * 2.0 - 1.0, ndcZ, 1.0);
     if (abs(p.w) < 1.0e-12) return vec3(-1.0, -1.0, 0.0);
     vec3 pos = p.xyz / p.w;
     bool byEntity = drawnByEntity(uvSrc, depth, fromB);
 #ifdef INTERPOLATE
-    vec2 residual = flowResidual(uvSrc, pos, byEntity, fromB);
+    vec2 residual = flowResidual(depthTex, uvSrc, pos, byEntity, fromB);
 #endif
     if (byEntity) pos += entityMotion(pos, fromB);
     vec4 clip = dstViewProj * vec4(pos, 1.0);
@@ -322,7 +341,7 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
                 vec2 uvc = clamp(uv, 0.0, 1.0);
                 float d = texture(depthTex, uvc).r;
                 bool sky = isSky(d);
-                vec3 spot = sky ? vec3(uvDst + (uvc - skyUv), 1.0) : landingSpot(uvc, d, invViewProj, dstViewProj, fromB);
+                vec3 spot = sky ? vec3(uvDst + (uvc - skyUv), 1.0) : landingSpot(depthTex, uvc, d, invViewProj, dstViewProj, fromB);
                 if (spot.z < 0.5) break; // behind the output camera: this chain can't go on
                 vec2 landed = spot.xy;
                 float errPx = length((landed - uvDst) * screen);
@@ -356,7 +375,7 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
                 float ndcZ = Params2.y > 0.5 ? d : d * 2.0 - 1.0;
                 vec4 p = invViewProj * vec4(uvSrc * 2.0 - 1.0, ndcZ, 1.0);
 #ifdef INTERPOLATE
-                w.flowed = abs(p.w) > 1.0e-12 && flowResidual(clamp(uvSrc, 0.0, 1.0), p.xyz / p.w,
+                w.flowed = abs(p.w) > 1.0e-12 && flowResidual(depthTex, clamp(uvSrc, 0.0, 1.0), p.xyz / p.w,
                         drawnByEntity(clamp(uvSrc, 0.0, 1.0), d, fromB), fromB) != vec2(0.0);
 #endif
                 w.entity = abs(p.w) > 1.0e-12 && drawnByEntity(clamp(uvSrc, 0.0, 1.0), d, fromB) && any(notEqual(entityMotion(p.xyz / p.w, fromB), vec3(0.0)));

@@ -287,6 +287,10 @@ public final class FrameGenerator {
         genPlanned = false;
         // The auto cap's samples carry over between seconds; not across a pause or settings change.
         fitCount = missCount = roomySeconds = badSeconds = 0;
+        stepCheckSeconds = capHoldSeconds = 0;
+        capHoldNext = 30;
+        missBeforeStep = -1;
+        sliding = false;
         minSlackMs = Double.MAX_VALUE;
         // A settings change can change what a generated frame costs: measure it again.
         gpuPassAvgNs = 0;
@@ -411,21 +415,60 @@ public final class FrameGenerator {
     private int fitCount, missCount, roomySeconds, badSeconds;
     private double minSlackMs = Double.MAX_VALUE;
     private int capFloor = 30;
+    // Checking a step down: seconds left, the late share before it, and a pause after a useless one.
+    private int stepCheckSeconds, capHoldSeconds;
+    private double missBeforeStep = -1;
+    private int capHoldNext = 30;
+    // Stepping down: the adjustment from before the first step, to go back to if it does not help.
+    private boolean sliding;
+    private int slideStartAdjust;
 
     private void adaptCap() {
         // Changing the cap resets vanilla's limiter and the pacing estimate (one hitch each time),
         // so it changes rarely: down after two bad seconds in a row, up after ten roomy ones.
+        // The wait after a useless step runs on wall-clock seconds (this runs once a second). A step is
+        // judged only once enough generated frames were counted (below), which on a slow GPU takes
+        // several seconds per tick.
+        if (capHoldSeconds > 0) capHoldSeconds--;
         int total = fitCount + missCount;
         if (total >= 10 && lastAutoCap > 0) {
+            double missRate = (double) missCount / total;
             boolean bad = missCount * 5 > total; // more than 20% early or late
             // (Some slack measured: frames made at loop start have none.)
             boolean roomy = missCount == 0 && minSlackMs < Double.MAX_VALUE && minSlackMs > 4.0;
             badSeconds = bad ? badSeconds + 1 : 0;
             roomySeconds = roomy ? roomySeconds + 1 : 0;
-            if (badSeconds >= 2) {
-                if (lastAutoCap - 2 >= capFloor) capAdjust += 2;
+            // Generated frames fit again: the way down so far is kept.
+            if (!bad && stepCheckSeconds == 0) sliding = false;
+            if (stepCheckSeconds > 0 && --stepCheckSeconds == 0 && missRate > missBeforeStep * 0.75) {
+                // The last step down did not make generated frames fit (the GPU, not the idle
+                // time, is the limit): it only cost real frames. Undo the whole way down since
+                // generated frames last fit (keeping steps that only seemed to help, since the late
+                // share is noisy, ratcheted it down), and wait before trying again. Without this a
+                // GPU-bound system went all the way down to the floor.
+                capAdjust = slideStartAdjust;
+                // Longer each time it does not help (each change is a small hitch): 30 s up to 5 min.
+                capHoldSeconds = capHoldNext;
+                capHoldNext = Math.min(300, capHoldNext * 2);
                 badSeconds = 0;
-            } else if (roomySeconds >= 10 && capAdjust > 0) {
+                sliding = false;
+                if (VFrameGen.config().debugPacingLog) VFrameGen.LOGGER.info("Auto frame cap: lowering did not help ({}% -> {}% late), back up",
+                        Math.round(missBeforeStep * 100), Math.round(missRate * 100));
+            } else if (badSeconds >= 2) {
+                if (capHoldSeconds == 0 && stepCheckSeconds == 0 && lastAutoCap - 2 >= capFloor) {
+                    if (!sliding) slideStartAdjust = capAdjust;
+                    sliding = true;
+                    capAdjust += 2;
+                    missBeforeStep = missRate;
+                    stepCheckSeconds = 3; // judged on the third second at the new cap
+                }
+                badSeconds = 0;
+            } else if (stepCheckSeconds == 0 && missBeforeStep >= 0 && capAdjust > 0 && capHoldSeconds == 0) {
+                // A step that held: the next useless one waits the shortest time again.
+                capHoldNext = 30;
+                missBeforeStep = -1;
+            }
+            if (roomySeconds >= 10 && capAdjust > 0) {
                 capAdjust -= 2;
                 roomySeconds = 0;
             }
@@ -468,7 +511,14 @@ public final class FrameGenerator {
         // The idle-time adjustment is measured (and recovered) only while interpolated frames are
         // generated. With adaptive generation at 1 frame per real frame nothing measures it, so
         // drop it: otherwise a lowered cap could hold the real frame rate below the target forever.
-        if (VFrameGen.config().adaptive && adaptiveMultiplier() <= 1.0 + 1.0e-6) capAdjust = 0;
+        if (VFrameGen.config().adaptive && adaptiveMultiplier() <= 1.0 + 1.0e-6) {
+            capAdjust = 0;
+            // Nothing is being stepped any more: a pending check would otherwise restore the
+            // adjustment that was just dropped.
+            stepCheckSeconds = 0;
+            sliding = false;
+            missBeforeStep = -1;
+        }
         // A screen that stops generation: no frames to make room for (the adjustment is kept for later).
         boolean screenBlocks = VFrameGen.config().disableWhileScreenOpen && mc.gui.screen() != null;
         int cap = presentThreadActive() || !interpolated() || screenBlocks ? full : Math.max(capFloor, full - capAdjust);
@@ -684,6 +734,17 @@ public final class FrameGenerator {
         // A teleport or respawn is not motion.
         boolean blur = cfg.motionBlur && hadPrev && jump <= cfg.maxCameraJumpBlocks;
         if ((!blur && !crosshairOn && !vignetteOn) || src == null || blurView == null) return color;
+        if (!src.fixedMaskValid) {
+            // An effect was switched on after this frame was captured (its mask is only drawn when
+            // something reads it): draw it now, before this pass opens.
+            if (!src.hasFinal) return color;
+            try {
+                buildFixedMask(src);
+            } catch (RuntimeException e) {
+                fail(e);
+                return color;
+            }
+        }
 
         GpuDevice device = RenderSystem.getDevice();
         boolean zeroToOne = device.getDeviceInfo().isZZeroToOne();
@@ -711,10 +772,8 @@ public final class FrameGenerator {
             pass.setPipeline(RenderSystem.getCompiledPipeline(blurPipeline(colorFormat)));
             // Nearest, like the GUI / hand tests: a filtered tap next to the GUI would blend it in.
             pass.setUniform("Color", color, nearest);
-            pass.setUniform("World", src.worldView, nearest);
-            pass.setUniform("Final", src.finalView, nearest);
+            pass.setUniform("Fixed", src.fixedMaskView, nearest);
             pass.setUniform("Depth", src.depthView, nearest);
-            pass.setUniform("Mask", src.maskView, nearest);
             pass.setUniform("Terrain", src.terrainDepthView, nearest);
             pass.setUniform("Vignette", vignette, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
             pass.setUniform("MotionBlur", blurUbo);
@@ -817,10 +876,8 @@ public final class FrameGenerator {
                 .withFragmentShader(Identifier.fromNamespaceAndPath(VFrameGen.MOD_ID, "core/motionblur"))
                 .withBindGroupLayout(BindGroupLayout.builder()
                         .withUniform("Color", UniformType.COMBINED_IMAGE_SAMPLER)
-                        .withUniform("World", UniformType.COMBINED_IMAGE_SAMPLER)
-                        .withUniform("Final", UniformType.COMBINED_IMAGE_SAMPLER)
+                        .withUniform("Fixed", UniformType.COMBINED_IMAGE_SAMPLER)
                         .withUniform("Depth", UniformType.COMBINED_IMAGE_SAMPLER)
-                        .withUniform("Mask", UniformType.COMBINED_IMAGE_SAMPLER)
                         .withUniform("Terrain", UniformType.COMBINED_IMAGE_SAMPLER)
                         .withUniform("Vignette", UniformType.COMBINED_IMAGE_SAMPLER)
                         .withUniform("MotionBlur", UniformType.UNIFORM_BUFFER)
@@ -1676,6 +1733,53 @@ public final class FrameGenerator {
         }
     }
 
+    private RenderPipeline fixedMaskPipeline;
+    private GpuBuffer fixedMaskUbo;
+
+    /**
+     * Mark slot c's GUI pixels (r) and GUI-or-held-item pixels (g), once per real frame, so the
+     * motion blur on every shown frame reads one texel per tap instead of comparing two full
+     * images and the hand mask each time.
+     */
+    private void buildFixedMask(FrameSlot c) {
+        GpuDevice device = RenderSystem.getDevice();
+        boolean handBuffer = c.hasHand && !Compat.irisShadersActive();
+        boolean nearLock = !handBuffer && c.firstPerson;
+        CommandEncoder encoder = device.createCommandEncoder();
+        if (fixedMaskUbo == null) {
+            fixedMaskUbo = device.createBuffer(() -> "VFrameGen GUI mask uniforms", GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, 16);
+        }
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            encoder.writeToBuffer(fixedMaskUbo.slice(), Std140Builder.onStack(stack, 16)
+                    .putVec4(VFrameGen.config().guiDiffThreshold, handBuffer ? 1f : 0f, nearLock ? 1f : 0f, 0f).get());
+        }
+        if (fixedMaskPipeline == null) {
+            fixedMaskPipeline = RenderPipeline.builder()
+                    .withLocation(Identifier.fromNamespaceAndPath(VFrameGen.MOD_ID, "pipeline/guimask"))
+                    .withVertexShader("core/screenquad")
+                    .withFragmentShader(Identifier.fromNamespaceAndPath(VFrameGen.MOD_ID, "core/guimask"))
+                    .withBindGroupLayout(BindGroupLayout.builder()
+                            .withUniform("World", UniformType.COMBINED_IMAGE_SAMPLER)
+                            .withUniform("Final", UniformType.COMBINED_IMAGE_SAMPLER)
+                            .withUniform("Mask", UniformType.COMBINED_IMAGE_SAMPLER)
+                            .withUniform("GuiMaskParams", UniformType.UNIFORM_BUFFER)
+                            .build())
+                    .withColorTargetState(new ColorTargetState(Optional.empty(), GpuFormat.RGBA8_UNORM, ColorTargetState.WRITE_ALL))
+                    .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
+                    .build();
+        }
+        GpuSampler nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
+        try (RenderPass pass = encoder.createRenderPass(() -> "VFrameGen GUI mask", c.fixedMaskView, Optional.empty())) {
+            pass.setPipeline(RenderSystem.getCompiledPipeline(fixedMaskPipeline));
+            pass.setUniform("World", c.worldView, nearest);
+            pass.setUniform("Final", c.finalView, nearest);
+            pass.setUniform("Mask", c.maskView, nearest);
+            pass.setUniform("GuiMaskParams", fixedMaskUbo);
+            pass.draw(3, 1, 0, 0);
+        }
+        c.fixedMaskValid = true;
+    }
+
     /** A source's matrices; positions are relative to that source's camera. */
     private static void putSource(Std140Builder ub, FrameSlot s, Matrix4f dstViewProjRot, Vector3d dstPos) {
         Matrix4f viewProjRot = new Matrix4f(s.proj).mul(s.viewRot);
@@ -1933,6 +2037,13 @@ public final class FrameGenerator {
             return null;
         }
         c.hasFinal = true;
+        c.fixedMaskValid = false;
+        try {
+            // Only what reads it needs it: motion blur, the vignette and the F3 crosshair.
+            if (VFrameGen.config().motionBlur || vignetteNext || crosshairOn) buildFixedMask(c);
+        } catch (RuntimeException e) {
+            fail(e);
+        }
         if (capture && !interpolated()) {
             DebugCapture.save(main.getColorTexture(), "9-real-next");
         }

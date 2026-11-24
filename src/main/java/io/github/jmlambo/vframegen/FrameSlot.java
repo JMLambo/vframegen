@@ -14,8 +14,10 @@ import org.joml.Vector3d;
 final class FrameSlot {
     final String name;
 
-    GpuTexture world, noHand, depth, handDepth, finalImage, mask, terrainDepth;
-    GpuTextureView worldView, noHandView, depthView, handDepthView, finalView, maskView, terrainDepthView;
+    GpuTexture world, noHand, depth, handDepth, finalImage, mask, terrainDepth, fixedMask;
+    GpuTextureView worldView, noHandView, depthView, handDepthView, finalView, maskView, terrainDepthView, fixedMaskView;
+    /** fixedMask was drawn for this frame (it is skipped when no effect reads it). */
+    boolean fixedMaskValid;
     /** terrainDepth holds this frame's depth from before entities were drawn. */
     boolean hasTerrainDepth;
 
@@ -61,6 +63,10 @@ final class FrameSlot {
         mask = device.createTexture("VFrameGen " + name + " hand mask",
                 GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING, GpuFormat.RGBA8_UNORM, w, h, 1, 1);
         maskView = device.createTextureView(mask);
+        // r: GUI, g: GUI or held item. Built once per real frame, after the GUI is drawn.
+        fixedMask = device.createTexture("VFrameGen " + name + " GUI mask",
+                GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING, GpuFormat.RGBA8_UNORM, w, h, 1, 1);
+        fixedMaskView = device.createTextureView(fixedMask);
         worldView = device.createTextureView(world);
         noHandView = device.createTextureView(noHand);
         finalView = device.createTextureView(finalImage);
@@ -71,14 +77,14 @@ final class FrameSlot {
     }
 
     void release() {
-        for (GpuTextureView v : new GpuTextureView[]{worldView, noHandView, finalView, depthView, handDepthView, maskView, terrainDepthView}) {
+        for (GpuTextureView v : new GpuTextureView[]{worldView, noHandView, finalView, depthView, handDepthView, maskView, terrainDepthView, fixedMaskView}) {
             if (v != null) v.close();
         }
-        for (GpuTexture t : new GpuTexture[]{world, noHand, finalImage, depth, handDepth, mask, terrainDepth}) {
+        for (GpuTexture t : new GpuTexture[]{world, noHand, finalImage, depth, handDepth, mask, terrainDepth, fixedMask}) {
             if (t != null) t.close();
         }
-        worldView = noHandView = finalView = depthView = handDepthView = maskView = terrainDepthView = null;
-        world = noHand = finalImage = depth = handDepth = mask = terrainDepth = null;
+        worldView = noHandView = finalView = depthView = handDepthView = maskView = terrainDepthView = fixedMaskView = null;
+        world = noHand = finalImage = depth = handDepth = mask = terrainDepth = fixedMask = null;
         hasTerrainDepth = false;
         valid = false;
         hasFinal = false;
