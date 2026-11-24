@@ -202,14 +202,16 @@ void main() {
         fragColor = fresh;
         return;
     }
-    // The held item was there last frame (any of the texels the history read blends): its colour
-    // is not the world's.
-    ivec2 ht = ivec2(floor(prevUv * FullSize.xy - 0.5));
+    // The held item was there last frame (any of the texels the history read blends with a
+    // weight above zero): its colour is not the world's.
+    vec2 hp = prevUv * FullSize.xy - 0.5;
+    ivec2 ht = ivec2(floor(hp));
+    vec2 hf = hp - vec2(ht);
     ivec2 hmax = ivec2(FullSize.xy) - 1;
-    float handPrev = max(max(texelFetch(History, clamp(ht, ivec2(0), hmax), 0).a,
-                             texelFetch(History, clamp(ht + ivec2(1, 0), ivec2(0), hmax), 0).a),
-                         max(texelFetch(History, clamp(ht + ivec2(0, 1), ivec2(0), hmax), 0).a,
-                             texelFetch(History, clamp(ht + ivec2(1, 1), ivec2(0), hmax), 0).a));
+    float handPrev = texelFetch(History, clamp(ht, ivec2(0), hmax), 0).a;
+    if (hf.x > 1.0e-3) handPrev = max(handPrev, texelFetch(History, clamp(ht + ivec2(1, 0), ivec2(0), hmax), 0).a);
+    if (hf.y > 1.0e-3) handPrev = max(handPrev, texelFetch(History, clamp(ht + ivec2(0, 1), ivec2(0), hmax), 0).a);
+    if (hf.x > 1.0e-3 && hf.y > 1.0e-3) handPrev = max(handPrev, texelFetch(History, clamp(ht + ivec2(1, 1), ivec2(0), hmax), 0).a);
     if (handPrev > 0.95) {
         fragColor = fresh;
         return;

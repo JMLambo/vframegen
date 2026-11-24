@@ -66,8 +66,10 @@ public final class TemporalUpscaler {
     // the last frame's positions by id, to measure that motion.
     private static int entityCount;
     private static final float[] entityData = new float[MAX_ENTITIES * 9];
-    private static Map<Integer, double[]> prevEntityPos = new HashMap<>();
-    private static Map<Integer, double[]> nextEntityPos = new HashMap<>();
+    private static it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap<double[]> prevEntityPos = new it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap<>();
+    private static it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap<double[]> nextEntityPos = new it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap<>();
+    // Position records, reused from frame to frame.
+    private static final java.util.ArrayDeque<double[]> spare = new java.util.ArrayDeque<>();
 
     private static boolean jittered;   // this frame's projection is shifted
     private static boolean ran;        // this frame was resolved
@@ -334,15 +336,19 @@ public final class TemporalUpscaler {
                 double x = net.minecraft.util.Mth.lerp(pt, e.xo, e.getX());
                 double y = net.minecraft.util.Mth.lerp(pt, e.yo, e.getY());
                 double z = net.minecraft.util.Mth.lerp(pt, e.zo, e.getZ());
-                nextEntityPos.put(e.getId(), new double[]{x, y, z});
+                double dx = x - cam.pos.x, dy = y - cam.pos.y, dz = z - cam.pos.z;
+                double d2 = dx * dx + dy * dy + dz * dz;
+                if (d2 > 96.0 * 96.0) continue;
+                double[] rec = spare.isEmpty() ? new double[3] : spare.pop();
+                rec[0] = x;
+                rec[1] = y;
+                rec[2] = z;
+                nextEntityPos.put(e.getId(), rec);
                 double[] before = prevEntityPos.get(e.getId());
                 if (reset || before == null) continue;
                 double mx = x - before[0], my = y - before[1], mz = z - before[2];
                 double m2 = mx * mx + my * my + mz * mz;
                 if (m2 < 1.0e-8 || m2 > 64.0) continue;
-                double dx = x - cam.pos.x, dy = y - cam.pos.y, dz = z - cam.pos.z;
-                double d2 = dx * dx + dy * dy + dz * dz;
-                if (d2 > 96.0 * 96.0) continue;
                 if (n == MAX_ENTITIES && d2 >= nearDist[n - 1]) continue;
                 int k = n < MAX_ENTITIES ? n++ : n - 1;
                 while (k > 0 && nearDist[k - 1] > d2) {
@@ -374,7 +380,9 @@ public final class TemporalUpscaler {
             }
         }
         java.util.Arrays.fill(entityData, entityCount * 9, entityData.length, 0f);
-        Map<Integer, double[]> swap = prevEntityPos;
+        spare.addAll(prevEntityPos.values());
+        prevEntityPos.clear();
+        var swap = prevEntityPos;
         prevEntityPos = nextEntityPos;
         nextEntityPos = swap;
     }
