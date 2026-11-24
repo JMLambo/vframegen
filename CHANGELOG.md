@@ -10,6 +10,10 @@
 - Motion blur is cheaper with the same look: whether a pixel is GUI or the held item is worked out
   once per real frame instead of again for every blur sample on every shown frame, and short smears
   take fewer samples. Together about 9 more real fps on the 660M with motion blur on.
+- Cleaner edges in generated frames with optical flow on (NVIDIA): the edges of nearby blocks, such
+  as a tree trunk you walk past, no longer bulge or leave dark streaks. Optical flow is now left out
+  right at the edge of a nearby block, where depth already moves it exactly; mobs keep it. No
+  measurable cost.
 
 ## 1.0.0-beta.6
 
