@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Better temporal upscaler (Temporal / TAAU, shaders off):
+  - Moving mobs stay sharp: the history now follows the nearest moving entities instead of only
+    the camera, so walking animals no longer smear or leave a faint trail.
+  - More detail at low render scales: the sub-pixel jitter cycle grows with the render scale (8
+    positions at 100%, about 18 at 67%, 32 at 50%), so every output pixel gets more samples.
+  - Steadier picture: each pixel keeps track of how much history it has gathered, so newly
+    uncovered areas sharpen within a few frames and settled areas flicker less (about a third less
+    on still grass in a test on an RTX 4050).
+- Correction to the 1.0.0-beta.7 notes: the optical-flow edge fix applies to both kinds of optical
+  flow (NVIDIA hardware and the shader version on other GPUs), not only NVIDIA. It was measured on
+  NVIDIA.
+
 ## 1.0.0-beta.7
 
 - More real fps with frame generation on a GPU that is already busy. The auto frame cap lowered the
