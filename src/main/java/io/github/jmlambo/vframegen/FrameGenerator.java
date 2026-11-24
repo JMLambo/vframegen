@@ -426,6 +426,10 @@ public final class FrameGenerator {
     private void adaptCap() {
         // Changing the cap resets vanilla's limiter and the pacing estimate (one hitch each time),
         // so it changes rarely: down after two bad seconds in a row, up after ten roomy ones.
+        // The wait after a useless step runs on wall-clock seconds (this runs once a second). A step is
+        // judged only once enough generated frames were counted (below), which on a slow GPU takes
+        // several seconds per tick.
+        if (capHoldSeconds > 0) capHoldSeconds--;
         int total = fitCount + missCount;
         if (total >= 10 && lastAutoCap > 0) {
             double missRate = (double) missCount / total;
@@ -434,7 +438,6 @@ public final class FrameGenerator {
             boolean roomy = missCount == 0 && minSlackMs < Double.MAX_VALUE && minSlackMs > 4.0;
             badSeconds = bad ? badSeconds + 1 : 0;
             roomySeconds = roomy ? roomySeconds + 1 : 0;
-            if (capHoldSeconds > 0) capHoldSeconds--;
             // Generated frames fit again: the way down so far is kept.
             if (!bad && stepCheckSeconds == 0) sliding = false;
             if (stepCheckSeconds > 0 && --stepCheckSeconds == 0 && missRate > missBeforeStep * 0.75) {
