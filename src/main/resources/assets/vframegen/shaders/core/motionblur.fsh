@@ -22,10 +22,8 @@
 // oval of moving world in the middle of a still frame). The real frame's GUI is drawn without it.
 
 uniform sampler2D Color;  // the frame to show (world + GUI)
-uniform sampler2D World;  // Src world before the GUI
-uniform sampler2D Final;  // Src world + GUI
+uniform sampler2D Fixed;  // Src GUI mask (guimask.fsh): r GUI, g GUI or held item
 uniform sampler2D Depth;  // Src depth
-uniform sampler2D Mask;   // Src held item mask (lockmask.fsh)
 uniform sampler2D Terrain; // Src depth before entities were drawn (BlurEnt.y)
 uniform sampler2D Vignette; // vanilla's vignette texture (bound to Color when there is none)
 
@@ -33,8 +31,8 @@ layout(std140) uniform MotionBlur {
     mat4 SrcInvViewProj; // Src NDC -> position relative to Src's camera (rotation only)
     mat4 CurViewProj;    // position relative to Src's camera -> this frame's clip
     mat4 PrevViewProj;   // position relative to Src's camera -> the previous shown frame's clip
-    vec4 Params;   // x: strength (fraction of the frame interval), y: reversed Z, z: depth zero-to-one, w: GUI threshold
-    vec4 Params2;  // x: 1/width, y: 1/height, z: hand buffer valid, w: near-depth hand lock
+    vec4 Params;   // x: strength (fraction of the frame interval), y: reversed Z, z: depth zero-to-one, w: unused
+    vec4 Params2;  // x: 1/width, y: 1/height, z, w: unused
     vec4 Cross;          // xy: crosshair centre (uv), z: draw it, w: line width scale
     vec4 CrossTip[3];    // xy: axis end (uv), farthest first
     vec4 CrossColor[3];
@@ -53,15 +51,12 @@ bool isSky(float d) {
 }
 
 bool guiPixel(vec2 uv) {
-    vec3 diff = abs(texture(Final, uv).rgb - texture(World, uv).rgb);
-    return max(diff.r, max(diff.g, diff.b)) > Params.w;
+    return texture(Fixed, uv).r > 0.5;
 }
 
 // GUI or held item at uv: kept sharp, and never sampled into the world.
 bool fixedPixel(vec2 uv) {
-    if (guiPixel(uv)) return true;
-    vec2 m = texture(Mask, uv).rg;
-    return (Params2.z > 0.5 && m.r > 0.5) || (Params2.w > 0.5 && m.g > 0.5);
+    return texture(Fixed, uv).g > 0.5;
 }
 
 vec2 toUv(vec4 clip) {
@@ -136,17 +131,22 @@ vec3 blurred(vec2 uv, vec3 center) {
     vec2 motion = (toUv(cur) - toUv(prev)) * Params.x;
     float len = length(motion);
     motion *= 0.25 / (0.25 + len);
-    if (length(motion / Params2.xy) < 0.5) {
+    float lenPx = length(motion / Params2.xy);
+    if (lenPx < 0.5) {
         return center;
     }
 
+    // About one tap per 1.5 pixels of smear, 2 to SAMPLES: at high frame rates most shown frames
+    // move only a few pixels, where 8 taps read the same texels over and over.
+    int samples = clamp(int(ceil(lenPx / 1.5)), 2, SAMPLES);
     // Centred on the pixel, from where it was towards where it is, with a per-pixel offset so the
     // steps show as noise rather than copies.
     float dither = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
-    vec3 sum = center;
-    float weight = 1.0;
-    for (int i = 0; i < SAMPLES; i++) {
-        float s = (float(i) + dither) / float(SAMPLES) - 0.5;
+    // The centre keeps the share it had with SAMPLES taps.
+    float weight = float(samples) / float(SAMPLES);
+    vec3 sum = center * weight;
+    for (int i = 0; i < samples; i++) {
+        float s = (float(i) + dither) / float(samples) - 0.5;
         vec2 suv = uv + motion * s;
         if (any(lessThan(suv, vec2(0.0))) || any(greaterThan(suv, vec2(1.0)))) continue;
         if (fixedPixel(suv)) continue;

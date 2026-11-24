@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- More real fps with frame generation on a GPU that is already busy. The auto frame cap lowered the
+  real frame rate whenever generated frames came out off time, and kept lowering it, down to half,
+  even when that didn't help (the GPU, not the cap, was the limit). It now checks each step down,
+  goes back up when it didn't help, and waits longer before each new try. On a Radeon 660M at 1080p
+  (2x) real fps went from 44 to about 52.
+- Motion blur is cheaper with the same look: whether a pixel is GUI or the held item is worked out
+  once per real frame instead of again for every blur sample on every shown frame, and short smears
+  take fewer samples. Together about 9 more real fps on the 660M with motion blur on.
+
 ## 1.0.0-beta.6
 
 - Fixed frame generation failing on the first generated frame (and the game then crashing) on OpenGL
