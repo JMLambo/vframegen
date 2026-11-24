@@ -730,7 +730,18 @@ public final class FrameGenerator {
         prevShownValid = true;
         // A teleport or respawn is not motion.
         boolean blur = cfg.motionBlur && hadPrev && jump <= cfg.maxCameraJumpBlocks;
-        if ((!blur && !crosshairOn && !vignetteOn) || src == null || blurView == null || !src.fixedMaskValid) return color;
+        if ((!blur && !crosshairOn && !vignetteOn) || src == null || blurView == null) return color;
+        if (!src.fixedMaskValid) {
+            // An effect was switched on after this frame was captured (its mask is only drawn when
+            // something reads it): draw it now, before this pass opens.
+            if (!src.hasFinal) return color;
+            try {
+                buildFixedMask(src);
+            } catch (RuntimeException e) {
+                fail(e);
+                return color;
+            }
+        }
 
         GpuDevice device = RenderSystem.getDevice();
         boolean zeroToOne = device.getDeviceInfo().isZZeroToOne();
