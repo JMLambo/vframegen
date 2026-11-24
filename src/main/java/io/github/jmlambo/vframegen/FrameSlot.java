@@ -16,6 +16,8 @@ final class FrameSlot {
 
     GpuTexture world, noHand, depth, handDepth, finalImage, mask, terrainDepth, fixedMask;
     GpuTextureView worldView, noHandView, depthView, handDepthView, finalView, maskView, terrainDepthView, fixedMaskView;
+    /** fixedMask was drawn for this frame (it is skipped when no effect reads it). */
+    boolean fixedMaskValid;
     /** terrainDepth holds this frame's depth from before entities were drawn. */
     boolean hasTerrainDepth;
 

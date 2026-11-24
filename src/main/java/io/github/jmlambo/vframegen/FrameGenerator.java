@@ -508,7 +508,14 @@ public final class FrameGenerator {
         // The idle-time adjustment is measured (and recovered) only while interpolated frames are
         // generated. With adaptive generation at 1 frame per real frame nothing measures it, so
         // drop it: otherwise a lowered cap could hold the real frame rate below the target forever.
-        if (VFrameGen.config().adaptive && adaptiveMultiplier() <= 1.0 + 1.0e-6) capAdjust = 0;
+        if (VFrameGen.config().adaptive && adaptiveMultiplier() <= 1.0 + 1.0e-6) {
+            capAdjust = 0;
+            // Nothing is being stepped any more: a pending check would otherwise restore the
+            // adjustment that was just dropped.
+            stepCheckSeconds = 0;
+            sliding = false;
+            missBeforeStep = -1;
+        }
         // A screen that stops generation: no frames to make room for (the adjustment is kept for later).
         boolean screenBlocks = VFrameGen.config().disableWhileScreenOpen && mc.gui.screen() != null;
         int cap = presentThreadActive() || !interpolated() || screenBlocks ? full : Math.max(capFloor, full - capAdjust);
@@ -723,7 +730,7 @@ public final class FrameGenerator {
         prevShownValid = true;
         // A teleport or respawn is not motion.
         boolean blur = cfg.motionBlur && hadPrev && jump <= cfg.maxCameraJumpBlocks;
-        if ((!blur && !crosshairOn && !vignetteOn) || src == null || blurView == null) return color;
+        if ((!blur && !crosshairOn && !vignetteOn) || src == null || blurView == null || !src.fixedMaskValid) return color;
 
         GpuDevice device = RenderSystem.getDevice();
         boolean zeroToOne = device.getDeviceInfo().isZZeroToOne();
@@ -1756,6 +1763,7 @@ public final class FrameGenerator {
             pass.setUniform("GuiMaskParams", fixedMaskUbo);
             pass.draw(3, 1, 0, 0);
         }
+        c.fixedMaskValid = true;
     }
 
     /** A source's matrices; positions are relative to that source's camera. */
@@ -2015,8 +2023,10 @@ public final class FrameGenerator {
             return null;
         }
         c.hasFinal = true;
+        c.fixedMaskValid = false;
         try {
-            buildFixedMask(c);
+            // Only what reads it needs it: motion blur, the vignette and the F3 crosshair.
+            if (VFrameGen.config().motionBlur || vignetteNext || crosshairOn) buildFixedMask(c);
         } catch (RuntimeException e) {
             fail(e);
         }
