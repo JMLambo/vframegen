@@ -23,6 +23,17 @@ public final class DebugCapture {
     private static boolean requested;
     private static Path dir;
     private static boolean sequenceRequested;
+    // F8 with the frame log on: the next BURST presented frames, real and generated, as PNGs in order
+    // (one generated frame alone did not show problems that only appear from frame to frame).
+    private static final int BURST = 24;
+    private static int burstLeft;
+    private static int burstIndex;
+    private static Path burstDir;
+    // Copied on the GPU while the burst runs (cheap); written to disk only after it, so the saving
+    // does not stall the frames being captured.
+    private static final GpuTexture[] burstTex = new GpuTexture[BURST];
+    private static final String[] burstNames = new String[BURST];
+    private static final StringBuilder burstLog = new StringBuilder();
 
     private DebugCapture() {
     }
@@ -30,6 +41,18 @@ public final class DebugCapture {
     public static void request() {
         requested = VFrameGen.config().debugCaptures;
         sequenceRequested = VFrameGen.config().debugFrameLog;
+        if (VFrameGen.config().debugCaptures && VFrameGen.config().debugFrameLog) {
+            burstDir = FabricLoader.getInstance().getGameDir().resolve("vframegen-debug")
+                    .resolve(Util.getFilenameFormattedDateTime() + "-burst");
+            try {
+                Files.createDirectories(burstDir);
+                burstLeft = BURST;
+                burstIndex = 0;
+                burstLog.setLength(0);
+            } catch (Exception e) {
+                VFrameGen.LOGGER.warn("Could not create {}", burstDir, e);
+            }
+        }
     }
 
     /** An extra line in the sequence log (not a frame). */
@@ -57,6 +80,54 @@ public final class DebugCapture {
         }
         record(String.format(java.util.Locale.ROOT, "%05d-%s t=%.2f ms %s", frameNumber++ % 100000, kind,
                 System.nanoTime() / 1e6 % 1_000_000, info));
+        if (burstLeft > 0) {
+            int i = burstIndex++;
+            String name = String.format(java.util.Locale.ROOT, "%02d-%s", i, kind);
+            burstLog.append(String.format(java.util.Locale.ROOT, "%s t=%.2f ms %s%n", name, System.nanoTime() / 1e6 % 1_000_000, info));
+            burstNames[i] = name;
+            if (texture != null) {
+                try {
+                    GpuTexture t = burstTex[i];
+                    if (t == null || t.getWidth(0) != texture.getWidth(0) || t.getHeight(0) != texture.getHeight(0)
+                            || t.getFormat() != texture.getFormat()) {
+                        if (t != null) t.close();
+                        t = RenderSystem.getDevice().createTexture("VFrameGen burst " + i,
+                                GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_COPY_SRC, texture.getFormat(),
+                                texture.getWidth(0), texture.getHeight(0), 1, 1);
+                        burstTex[i] = t;
+                    }
+                    RenderSystem.getDevice().createCommandEncoder().copyTextureToTexture(texture, t, 0, 0, 0, 0, 0,
+                            t.getWidth(0), t.getHeight(0));
+                } catch (RuntimeException e) {
+                    burstNames[i] = null;
+                    VFrameGen.LOGGER.warn("Burst capture: could not copy frame {}", i, e);
+                }
+            } else {
+                burstNames[i] = null;
+            }
+            if (--burstLeft == 0) {
+                // Each copy is freed once it is written (a burst at 4K in RGBA16F holds about 1.5 GB).
+                for (int k = 0; k < BURST; k++) {
+                    if (burstTex[k] == null) continue;
+                    if (k < burstIndex && burstNames[k] != null) save(burstDir, burstTex[k], burstNames[k], true);
+                    else burstTex[k].close();
+                    burstTex[k] = null;
+                }
+                // Off the render thread: this runs right before a frame is presented.
+                Path file = burstDir.resolve("frames.txt");
+                String text = burstLog.toString();
+                int count = burstIndex;
+                Path where = burstDir;
+                Util.nonCriticalIoPool().execute(() -> {
+                    try {
+                        Files.writeString(file, text);
+                    } catch (Exception e) {
+                        VFrameGen.LOGGER.warn("Could not write {}", file, e);
+                    }
+                    VFrameGen.LOGGER.info("Saved a burst of {} frames to {}", count, where);
+                });
+            }
+        }
         if (!sequenceRequested) return;
         sequenceRequested = false;
         Path out = FabricLoader.getInstance().getGameDir().resolve("vframegen-debug")
@@ -109,7 +180,15 @@ public final class DebugCapture {
     }
 
     private static void save(Path dir, GpuTexture texture, String name) {
-        if (dir == null) return;
+        save(dir, texture, name, false);
+    }
+
+    /** closeTexture: the texture is a copy made for this save; closed once it has been read back. */
+    private static void save(Path dir, GpuTexture texture, String name, boolean closeTexture) {
+        if (dir == null) {
+            if (closeTexture) texture.close();
+            return;
+        }
         GpuFormat format = texture.getFormat();
         // 8-bit, or half float (some setups render the main target in RGBA16F): clamped to 0..1.
         boolean half = format == GpuFormat.RGBA16_FLOAT;
@@ -119,48 +198,60 @@ public final class DebugCapture {
         boolean flowFloat = format == GpuFormat.RG16_FLOAT;
         if (format != GpuFormat.RGBA8_UNORM && !half && !flow && !flowFloat) {
             VFrameGen.LOGGER.warn("Cannot save {}: format {} is not RGBA8 or RGBA16F", name, format);
+            if (closeTexture) texture.close();
             return;
         }
         int w = texture.getWidth(0);
         int h = texture.getHeight(0);
         int bpp = half ? 8 : 4;
         Path file = dir.resolve(name + ".png");
-        GpuBuffer buffer = RenderSystem.getDevice().createBuffer(() -> "VFrameGen capture " + name,
-                GpuBuffer.USAGE_MAP_READ | GpuBuffer.USAGE_COPY_DST, (long) w * h * bpp);
-        RenderSystem.getDevice().createCommandEncoder().copyTextureToBuffer(texture, buffer, 0, () -> {
-            try (GpuBufferSlice.MappedView view = buffer.map(true, false);
-                 NativeImage image = new NativeImage(w, h, false)) {
-                ByteBuffer data = view.data().order(ByteOrder.LITTLE_ENDIAN);
-                for (int y = 0; y < h; y++) {
-                    for (int x = 0; x < w; x++) {
-                        int abgr;
-                        if (flowFloat) {
-                            int o = (y * w + x) * 4;
-                            int r = Math.clamp(128 + Math.round(Float.float16ToFloat(data.getShort(o)) * 4f), 0, 255);
-                            int g = Math.clamp(128 + Math.round(Float.float16ToFloat(data.getShort(o + 2)) * 4f), 0, 255);
-                            abgr = 0xFF000000 | (128 << 16) | (g << 8) | r;
-                        } else if (flow) {
-                            int o = (y * w + x) * 4;
-                            int r = Math.clamp(128 + data.getShort(o) / 8, 0, 255), g = Math.clamp(128 + data.getShort(o + 2) / 8, 0, 255);
-                            abgr = 0xFF000000 | (128 << 16) | (g << 8) | r;
-                        } else if (half) {
-                            int o = (y * w + x) * 8;
-                            int r = unit(data.getShort(o)), g = unit(data.getShort(o + 2)), b = unit(data.getShort(o + 4));
-                            abgr = 0xFF000000 | (b << 16) | (g << 8) | r;
-                        } else {
-                            // RGBA bytes read little-endian are ABGR; force opaque.
-                            abgr = data.getInt((y * w + x) * 4) | 0xFF000000;
+        GpuBuffer created = null;
+        try {
+            created = RenderSystem.getDevice().createBuffer(() -> "VFrameGen capture " + name,
+                    GpuBuffer.USAGE_MAP_READ | GpuBuffer.USAGE_COPY_DST, (long) w * h * bpp);
+            GpuBuffer buffer = created;
+            RenderSystem.getDevice().createCommandEncoder().copyTextureToBuffer(texture, buffer, 0, () -> {
+                try (GpuBufferSlice.MappedView view = buffer.map(true, false);
+                     NativeImage image = new NativeImage(w, h, false)) {
+                    ByteBuffer data = view.data().order(ByteOrder.LITTLE_ENDIAN);
+                    for (int y = 0; y < h; y++) {
+                        for (int x = 0; x < w; x++) {
+                            int abgr;
+                            if (flowFloat) {
+                                int o = (y * w + x) * 4;
+                                int r = Math.clamp(128 + Math.round(Float.float16ToFloat(data.getShort(o)) * 4f), 0, 255);
+                                int g = Math.clamp(128 + Math.round(Float.float16ToFloat(data.getShort(o + 2)) * 4f), 0, 255);
+                                abgr = 0xFF000000 | (128 << 16) | (g << 8) | r;
+                            } else if (flow) {
+                                int o = (y * w + x) * 4;
+                                int r = Math.clamp(128 + data.getShort(o) / 8, 0, 255), g = Math.clamp(128 + data.getShort(o + 2) / 8, 0, 255);
+                                abgr = 0xFF000000 | (128 << 16) | (g << 8) | r;
+                            } else if (half) {
+                                int o = (y * w + x) * 8;
+                                int r = unit(data.getShort(o)), g = unit(data.getShort(o + 2)), b = unit(data.getShort(o + 4));
+                                abgr = 0xFF000000 | (b << 16) | (g << 8) | r;
+                            } else {
+                                // RGBA bytes read little-endian are ABGR; force opaque.
+                                abgr = data.getInt((y * w + x) * 4) | 0xFF000000;
+                            }
+                            image.setPixelABGR(x, y, abgr);
                         }
-                        image.setPixelABGR(x, y, abgr);
                     }
+                    image.writeToFile(file);
+                } catch (Exception e) {
+                    VFrameGen.LOGGER.warn("Could not save {}", file, e);
+                } finally {
+                    buffer.close();
+                    if (closeTexture) texture.close();
                 }
-                image.writeToFile(file);
-            } catch (Exception e) {
-                VFrameGen.LOGGER.warn("Could not save {}", file, e);
-            } finally {
-                buffer.close();
-            }
-        }, 0);
+            }, 0);
+        } catch (RuntimeException e) {
+            // The copy was never scheduled, so the callback will not run: free both here and skip
+            // only this image (a burst goes on with its other frames).
+            VFrameGen.LOGGER.warn("Could not read back {}", file, e);
+            if (created != null) created.close();
+            if (closeTexture) texture.close();
+        }
     }
 
     /** A half float, clamped to 0..1, as a byte. */

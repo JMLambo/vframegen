@@ -76,7 +76,7 @@ public final class FrameGenerator {
      */
     private static final float LOCKED_DISTANCE = 0.2f;
     // + entity count, and per source FrameSlot.MAX_ENTITIES x (box min, box max, motion).
-    private static final int UBO_SIZE = 7 * 64 + 6 * 16 + 2 * FrameSlot.MAX_ENTITIES * 4 * 16 + 2 * 64 + 3 * 16;
+    private static final int UBO_SIZE = 7 * 64 + 6 * 16 + 2 * FrameSlot.MAX_ENTITIES * 5 * 16 + 2 * 64 + 3 * 16;
 
     /** What vanilla's blit + present show at the end of this loop. */
     public enum Present { VANILLA, HELD }
@@ -193,8 +193,8 @@ public final class FrameGenerator {
         if (lastScreenNs != 0 && t >= lastScreenNs) {
             double g = (t - lastScreenNs) / 1e6;
             if (g < 250) {
-                if (lastScreenReal && !real) { gapRgSum += g; gapRgN++; }
-                if (!lastScreenReal && real) { gapGrSum += g; gapGrN++; }
+                if (lastScreenReal && !real) { gapRgSum += g; gapRgN++; unevenRg += g; unevenRgN++; }
+                if (!lastScreenReal && real) { gapGrSum += g; gapGrN++; unevenGr += g; unevenGrN++; }
                 gapScrMin = Math.min(gapScrMin, g);
                 gapScrMax = Math.max(gapScrMax, g);
                 gapBuckets[g < 4 ? 0 : g < 8 ? 1 : g < 12 ? 2 : g < 20 ? 3 : g < 30 ? 4 : 5]++;
@@ -202,6 +202,43 @@ public final class FrameGenerator {
         }
         lastScreenNs = Math.max(t, lastScreenNs);
         lastScreenReal = real;
+        checkUneven(t);
+    }
+
+    // Without the present thread (OpenGL), generated frames can only go out on time when the GPU has
+    // idle time between frames. With none they go out late, just before the next real frame (a
+    // Radeon 660M: 24 ms after a real frame, then the real one 1.5 ms later), and motion judders
+    // (moving mobs look torn; the screen can flicker in brightness). Judged on the gaps on screen:
+    // an RTX 4050 on OpenGL missed the exact due times as often but its gaps were even (6.3 / 7.6 ms).
+    // Said once per session, in the log.
+    private double unevenRg, unevenGr;
+    private int unevenRgN, unevenGrN, unevenWindows;
+    private long unevenWindowStart;
+    private boolean unevenWarned;
+
+    private void checkUneven(long now) {
+        if (unevenWarned) return;
+        if (unevenWindowStart == 0) unevenWindowStart = now;
+        if (now - unevenWindowStart < 5_000_000_000L) return;
+        boolean bad = false;
+        if (!presentThreadActive() && unevenRgN >= 50 && unevenGrN >= 50) {
+            double rg = unevenRg / unevenRgN, gr = unevenGr / unevenGrN;
+            bad = Math.max(rg, gr) > 3.0 * Math.max(0.1, Math.min(rg, gr));
+            unevenWindows = bad ? unevenWindows + 1 : 0;
+            if (unevenWindows >= 2) {
+                unevenWarned = true;
+                VFrameGen.LOGGER.warn("Generated frames cannot be shown evenly here: on screen, {} ms after a real frame, then {} ms "
+                                + "until the next one ({} backend; the GPU has no time to spare between frames). Motion may judder, "
+                                + "moving mobs may look torn and the screen may flicker in brightness. Frame generation is smoothest "
+                                + "on Vulkan, where generated frames are shown from their own thread; on a GPU this busy, upscaling "
+                                + "and anti-aliasing without frame generation may play better.",
+                        String.format(Locale.ROOT, "%.1f", rg), String.format(Locale.ROOT, "%.1f", gr), backendName());
+            }
+        }
+        if (!bad) unevenWindows = 0;
+        unevenRg = unevenGr = 0;
+        unevenRgN = unevenGrN = 0;
+        unevenWindowStart = now;
     }
 
     private void logPacing() {
@@ -1434,7 +1471,8 @@ public final class FrameGenerator {
             // had right; above it, 0.05%, while burning mobs' fire was still followed.
             ub.putVec4(2.5f, 48f, flow != null ? flow.width : 0f, flow != null ? flow.height : 0f);
             ub.putVec4(lowRes ? (float) renderWidth / width : 1f,
-                    lowRes && cfg.upscaler != FrameGenConfig.Upscaler.TEMPORAL ? 1f : 0f, 0f, 0f);
+                    lowRes && cfg.upscaler != FrameGenConfig.Upscaler.TEMPORAL ? 1f : 0f,
+                    TemporalUpscaler.wanted() ? 1f : 0f, 0f);
             ByteBuffer data = ub.get();
             encoder.writeToBuffer(ubo.slice(), data);
         }
@@ -1487,13 +1525,18 @@ public final class FrameGenerator {
                 double dx = other.entityPos[j * 3] - src.entityPos[i * 3];
                 double dy = other.entityPos[j * 3 + 1] - src.entityPos[i * 3 + 1];
                 double dz = other.entityPos[j * 3 + 2] - src.entityPos[i * 3 + 2];
-                if (dx * dx + dy * dy + dz * dz < 1.0e-8 || dx * dx + dy * dy + dz * dz > 64.0) continue; // still, or teleported
+                // Body rotation too (setting entityRotation, experimental): it turns the mob as well.
+                float turn = VFrameGen.config().entityRotation
+                        ? (float) Math.toRadians(net.minecraft.util.Mth.wrapDegrees(other.entityYaw[j] - src.entityYaw[i])) : 0f;
+                double moved2 = dx * dx + dy * dy + dz * dz;
+                if ((moved2 < 1.0e-8 && Math.abs(turn) < 1.0e-4f) || moved2 > 64.0) continue; // still, or teleported
                 if (ub != null) {
                     float ox = (float) (src.entityPos[i * 3] - src.pos.x);
                     float oy = (float) (src.entityPos[i * 3 + 1] - src.pos.y);
                     float oz = (float) (src.entityPos[i * 3 + 2] - src.pos.z);
                     float[] bx = src.entityBox;
                     float mx = (float) dx * f, my = (float) dy * f, mz = (float) dz * f;
+                    float rot = turn * f, rc = (float) Math.cos(rot), rs = (float) Math.sin(rot);
                     float x0 = ox + bx[i * 6], y0 = oy + bx[i * 6 + 1], z0 = oz + bx[i * 6 + 2];
                     float x1 = ox + bx[i * 6 + 3], y1 = oy + bx[i * 6 + 4], z1 = oz + bx[i * 6 + 5];
                     // Screen motion of the box centre, and the moved box's rectangle in the output.
@@ -1508,8 +1551,10 @@ public final class FrameGenerator {
                         boolean front = true;
                         float ux0 = 2f, uy0 = 2f, ux1 = -1f, uy1 = -1f;
                         for (int k = 0; k < 8 && front; k++) {
+                            // The corner turned about the entity's position, then moved.
+                            float kx = ((k & 1) == 0 ? x0 : x1) - ox, kz = ((k & 4) == 0 ? z0 : z1) - oz;
                             org.joml.Vector4f c = dstViewProj.transform(entCorner.set(
-                                    ((k & 1) == 0 ? x0 : x1) + mx, ((k & 2) == 0 ? y0 : y1) + my, ((k & 4) == 0 ? z0 : z1) + mz, 1f));
+                                    ox + kx * rc - kz * rs + mx, ((k & 2) == 0 ? y0 : y1) + my, oz + kx * rs + kz * rc + mz, 1f));
                             if (c.w <= 1.0e-4f) {
                                 front = false;
                                 break;
@@ -1529,15 +1574,17 @@ public final class FrameGenerator {
                     }
                     ub.putVec4(x0, y0, z0, su);
                     ub.putVec4(x1, y1, z1, sv);
-                    ub.putVec4(mx, my, mz, 0f);
+                    ub.putVec4(mx, my, mz, rot);
                     ub.putVec4(rx0, ry0, rx1, ry1);
+                    ub.putVec4(ox, oy, oz, 0f);
                 }
                 n++;
             }
         }
         if (ub != null) {
             for (int i = n; i < FrameSlot.MAX_ENTITIES; i++) {
-                ub.putVec4(0f, 0f, 0f, 0f).putVec4(-1f, -1f, -1f, 0f).putVec4(0f, 0f, 0f, 0f).putVec4(2f, 2f, -1f, -1f);
+                ub.putVec4(0f, 0f, 0f, 0f).putVec4(-1f, -1f, -1f, 0f).putVec4(0f, 0f, 0f, 0f).putVec4(2f, 2f, -1f, -1f)
+                        .putVec4(0f, 0f, 0f, 0f);
             }
         }
         return n;
@@ -1645,6 +1692,10 @@ public final class FrameGenerator {
             c.entityVel[i * 3] = (float) ((e.getX() - e.xo) * tps);
             c.entityVel[i * 3 + 1] = (float) ((e.getY() - e.yo) * tps);
             c.entityVel[i * 3 + 2] = (float) ((e.getZ() - e.zo) * tps);
+            // The body's rotation as drawn (living entities turn their body; others their whole model).
+            c.entityYaw[i] = e instanceof net.minecraft.world.entity.LivingEntity le
+                    ? net.minecraft.util.Mth.rotLerp(pt, le.yBodyRotO, le.yBodyRot)
+                    : net.minecraft.util.Mth.rotLerp(pt, e.yRotO, e.getYRot());
         }
     }
 

@@ -43,7 +43,8 @@ pacing.
 4. In game, open **Video Settings → Graphics Backend** and select **Vulkan**, which gives the best
    experience (the most exact frame pacing, and everything works). **OpenGL** works too: use it if
    you run an Iris shader pack (official Iris only supports OpenGL) or if Vulkan doesn't work on your
-   PC. On OpenGL the pacing is a little less exact, and without Sodium optical flow is not available
+   PC. On OpenGL the pacing is less exact (on a GPU with no time to spare, motion can judder; see
+   [Known issues](#known-issues)), and without Sodium optical flow is not available
    (see [Compatibility](#compatibility)).
 5. Turn **VSync off**, and press **F9** to toggle frame generation.
 
@@ -235,10 +236,13 @@ Toggle key: **F9** (rebind under Controls → VFrameGen).
 - **Limits**: when not to generate frames (camera jumps, fast turns, very slow real frames).
 - **Quality**: sharpening of generated frames, anti-aliasing and its quality, motion blur, optical
   flow (beta; its tooltip says whether your GPU uses hardware or the experimental shader version),
-  GUI detection threshold.
+  following mobs turning (experimental, off by default: generated frames also turn moving mobs
+  with their body rotation, not just move them; no visible difference in tests so far), GUI
+  detection threshold.
 - **Debug** (all off by default): a magenta tint on generated frames, F8 captures (images and
-  validation frames go to `vframegen-debug/`), a rolling log of the last ~10 s of presented frames,
-  and stats, pacing and stall lines in the game log.
+  validation frames go to `vframegen-debug/`; with the frame log on too, F8 also saves the next 24
+  frames in a row), a rolling log of the last ~10 s of presented frames, and stats, pacing and
+  stall lines in the game log.
 
 The F3 screen shows `VFrameGen: N real + M generated`, and the FPS counter includes generated
 frames.
@@ -257,6 +261,17 @@ frames.
   Horizons' CPU load, and a low-pause collector (`-XX:+UseZGC`) all help.
 
 ## Known issues
+
+- **OpenGL (or the present thread off) on a GPU with no time to spare: uneven frame timing.**
+  Without the Vulkan present thread, generated frames can only be shown at the right moment when the
+  GPU has some idle time between frames (see [Pacing](#pacing)). When it has none, which is typical
+  on integrated graphics, each generated frame goes out late, just before the next real frame.
+  Motion then judders: moving mobs can look torn apart, and the whole screen can flicker in
+  brightness. The generated frames themselves are fine (checked frame by frame on a Radeon 660M);
+  only their timing is off. On Vulkan with the present thread on (the default), generated frames
+  are shown from their own thread at the right moment, and the same setup is smooth. VFrameGen
+  notes it in the game log when it happens. Use Vulkan with the present thread on, or on integrated
+  graphics use upscaling and anti-aliasing without frame generation.
 
 - **OpenGL without Sodium: no optical flow, and render-scale frame generation draws at full
   resolution.** The game's own OpenGL renderer lets a draw read only 12 textures (Sodium raises

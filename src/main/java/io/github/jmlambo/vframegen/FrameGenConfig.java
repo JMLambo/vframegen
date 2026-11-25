@@ -63,6 +63,7 @@ public final class FrameGenConfig {
     public boolean debugFrameLog = false;
     public boolean debugOpticalFlow = false;
     public boolean opticalFlow = true;
+    public boolean entityRotation = false;
     public boolean debugStatsLog = false;
     public boolean debugPacingLog = false;
     public boolean debugStallLog = false;
@@ -135,6 +136,9 @@ public final class FrameGenConfig {
                                     frames, so generated frames also follow what depth alone cannot (limbs,
                                     particles, water, animated textures). NVIDIA RTX on Vulkan uses its optical
                                     flow hardware; other GPUs measure it with shaders (experimental).
+            entityRotation          (experimental) interpolated mode: generated frames also turn moving mobs
+                                    with their body rotation, not only move them (head and limbs are not
+                                    followed). Uses the game's own body rotation, so it works with model mods.
             debugOpticalFlow        interpolated mode: measure optical flow even when it is not used; F8 saves
                                     it as an image
                                     (F8 captures need debugCaptures on).
@@ -189,6 +193,7 @@ public final class FrameGenConfig {
                 c.debugFrameLog = bool(props, "debugFrameLog", c.debugFrameLog);
                 c.debugOpticalFlow = bool(props, "debugOpticalFlow", c.debugOpticalFlow);
                 c.opticalFlow = bool(props, "opticalFlow", c.opticalFlow);
+                c.entityRotation = bool(props, "entityRotation", c.entityRotation);
                 c.debugStatsLog = bool(props, "debugStatsLog", c.debugStatsLog);
                 c.debugPacingLog = bool(props, "debugPacingLog", c.debugPacingLog);
                 c.debugStallLog = bool(props, "debugStallLog", c.debugStallLog);
@@ -257,6 +262,7 @@ public final class FrameGenConfig {
         values.put("debugFrameLog", Boolean.toString(debugFrameLog));
         values.put("debugOpticalFlow", Boolean.toString(debugOpticalFlow));
         values.put("opticalFlow", Boolean.toString(opticalFlow));
+        values.put("entityRotation", Boolean.toString(entityRotation));
         values.put("debugStatsLog", Boolean.toString(debugStatsLog));
         values.put("debugPacingLog", Boolean.toString(debugPacingLog));
         values.put("debugStallLog", Boolean.toString(debugStallLog));

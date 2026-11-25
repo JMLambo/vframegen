@@ -51,16 +51,17 @@ layout(std140) uniform FrameGen {
     vec4 BFlags;
     vec4 Mix;      // x: position between A (0) and B (1)
     vec4 EntCount; // x: entities in A, y: in B, z/w: TerrainA/B valid
-    // Per source, 32 x (box min (w: screen motion x), box max (w: y), motion to the output frame,
-    // screen rectangle in the output), relative to its camera.
-    vec4 EntA[128];
-    vec4 EntB[128];
+    // Per source, 32 x (box min (w: screen motion x), box max (w: y), motion to the output frame (w:
+    // body turn, radians), screen rectangle in the output, position it turns about), relative to its camera.
+    vec4 EntA[160];
+    vec4 EntB[160];
     mat4 AToB;      // position relative to A's camera -> B clip (optical flow)
     mat4 BToA;      // position relative to B's camera -> A clip
     vec4 FlowParams; // x: optical flow on, y: trusted forward/backward disagreement (pixels^2), zw: texel value -> uv
     vec4 FlowLimits; // x: smallest residual used (pixels), y: largest, zw: measured image size (pixels)
     vec4 Out;        // x: output pixels per full-resolution pixel (the render scale in the LOWRES pass, else 1),
-                     // y: LOWRES reads NoHand, the image the real frames are upscaled from
+                     // y: LOWRES reads NoHand, the image the real frames are upscaled from,
+                     // z: World is the temporal upscaler's image (read with Catmull-Rom)
 };
 
 #ifdef COMPOSITE
@@ -109,15 +110,24 @@ vec3 projectDirection(vec2 uvDst, mat4 srcViewProjRot) {
     return vec3((clip.xy / clip.w) * 0.5 + 0.5, 1.0);
 }
 
-// A point (relative to the source camera) inside a moving entity's box moves with it as well.
-// Root motion only, so it is the same for any model or animation mod.
-vec3 entityMotion(vec3 p, bool fromB) {
+// A point (relative to the source camera) inside a moving entity's box moves with it as well:
+// its root motion, and with entityRotation (experimental) its body turning about its position (w
+// of the motion, radians; 0 otherwise). Not the limbs or head, so it is the same for any model or
+// animation mod.
+vec3 entityMotion(vec3 p, bool fromB, float k) {
     int n = int(fromB ? EntCount.y : EntCount.x);
     for (int i = 0; i < n; i++) {
-        vec3 lo = fromB ? EntB[i * 4].xyz : EntA[i * 4].xyz;
-        vec3 hi = fromB ? EntB[i * 4 + 1].xyz : EntA[i * 4 + 1].xyz;
+        vec3 lo = fromB ? EntB[i * 5].xyz : EntA[i * 5].xyz;
+        vec3 hi = fromB ? EntB[i * 5 + 1].xyz : EntA[i * 5 + 1].xyz;
         if (all(greaterThanEqual(p, lo)) && all(lessThanEqual(p, hi))) {
-            return fromB ? EntB[i * 4 + 2].xyz : EntA[i * 4 + 2].xyz;
+            vec4 m = fromB ? EntB[i * 5 + 2] : EntA[i * 5 + 2];
+            vec3 pivot = fromB ? EntB[i * 5 + 4].xyz : EntA[i * 5 + 4].xyz;
+            vec2 r = p.xz - pivot.xz;
+            // k scales the step (1: to the output frame; 1 / frac: the whole step to the other
+            // frame), the angle as well as the translation (a turn is not linear in its angle).
+            float c = cos(m.w * k), s = sin(m.w * k);
+            vec2 turned = vec2(r.x * c - r.y * s, r.x * s + r.y * c);
+            return m.xyz * k + vec3(turned.x - r.x, 0.0, turned.y - r.y);
         }
     }
     return vec3(0.0);
@@ -174,7 +184,7 @@ vec2 flowResidual(sampler2D depthTex, vec2 uvSrc, vec3 pos, bool byEntity, bool 
     if (dot(errPx, errPx) > FlowParams.y) return vec2(0.0);
     // Entity root motion to the output frame covers a fraction of the step; over the whole step:
     float frac = fromB ? 1.0 - Mix.x : Mix.x;
-    vec3 moved = byEntity ? pos + entityMotion(pos, fromB) / max(frac, 1.0e-3) : pos;
+    vec3 moved = byEntity ? pos + entityMotion(pos, fromB, 1.0 / max(frac, 1.0e-3)) : pos;
     vec4 clip = (fromB ? BToA : AToB) * vec4(moved, 1.0);
     if (clip.w <= 1.0e-6) return vec2(0.0);
     vec2 predicted = (clip.xy / clip.w) * 0.5 + 0.5;
@@ -201,7 +211,7 @@ vec3 landingSpot(sampler2D depthTex, vec2 uvSrc, float depth, mat4 invViewProj, 
 #ifdef INTERPOLATE
     vec2 residual = flowResidual(depthTex, uvSrc, pos, byEntity, fromB);
 #endif
-    if (byEntity) pos += entityMotion(pos, fromB);
+    if (byEntity) pos += entityMotion(pos, fromB, 1.0);
     vec4 clip = dstViewProj * vec4(pos, 1.0);
     if (clip.w <= 1.0e-6) return vec3(-1.0, -1.0, 0.0);
     vec2 landed = (clip.xy / clip.w) * 0.5 + 0.5;
@@ -224,7 +234,6 @@ bool offscreen(vec2 uv) {
 // NoHand is read only there: with render scale it is the low-resolution image from before the
 // upscaler, and reading it everywhere made generated frames soft next to the upscaled real frames
 // (fine textures such as water flickered between sharp and soft: shaking).
-#ifdef LOWRES
 // Catmull-Rom (5 bilinear reads). Reading between the pixels of the small image with bilinear
 // filtering blurred it, and the upscaler then enlarged that blur: generated frames came out softer
 // than the real ones, and distant detail flickered between sharp and soft.
@@ -247,7 +256,6 @@ vec3 catmullRom(sampler2D tex, vec2 uv) {
     float n = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;
     return max(r / n, vec3(0.0));
 }
-#endif
 
 vec3 sceneColor(sampler2D world, sampler2D noHand, sampler2D mask, vec2 uv, vec4 flags) {
 #ifdef LOWRES
@@ -261,10 +269,12 @@ vec3 sceneColor(sampler2D world, sampler2D noHand, sampler2D mask, vec2 uv, vec4
     bool behindHand = false;
     if (flags.x > 0.5) {
         // Within a pixel of the hand too (the whole 3x3 around uv): a filtered World read there
-        // would pick up its edge.
+        // would pick up its edge. Two pixels with the Catmull-Rom read below (Out.z), which
+        // reaches that far.
         vec2 px = Params2.zw;
-        for (int y = -1; y <= 1 && !behindHand; y++) {
-            for (int x = -1; x <= 1; x++) {
+        int reach = Out.z > 0.5 ? 2 : 1;
+        for (int y = -reach; y <= reach && !behindHand; y++) {
+            for (int x = -reach; x <= reach; x++) {
                 if (texture(mask, uv + vec2(x, y) * px).r > 0.5) {
                     behindHand = true;
                     break;
@@ -272,7 +282,11 @@ vec3 sceneColor(sampler2D world, sampler2D noHand, sampler2D mask, vec2 uv, vec4
             }
         }
     }
-    return behindHand ? texture(noHand, uv).rgb : texture(world, uv).rgb;
+    if (behindHand) return texture(noHand, uv).rgb;
+    // The temporal upscaler's image (Out.z): sharp to the pixel, so a bilinear read between its
+    // pixels came out softer than the real frames around it, and fine textures such as grass shook
+    // between sharp and soft while moving.
+    return Out.z > 0.5 ? catmullRom(world, uv) : texture(world, uv).rgb;
 }
 
 Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampler2D noHand, sampler2D finalTex,
@@ -330,9 +344,9 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
         int seedCount = 0;
         int ents = int(fromB ? EntCount.y : EntCount.x);
         for (int e = 0; e < ents && seedCount < 4; e++) {
-            vec4 rect = fromB ? EntB[e * 4 + 3] : EntA[e * 4 + 3];
+            vec4 rect = fromB ? EntB[e * 5 + 3] : EntA[e * 5 + 3];
             if (uvDst.x < rect.x || uvDst.y < rect.y || uvDst.x > rect.z || uvDst.y > rect.w) continue;
-            vec2 motion = vec2(fromB ? EntB[e * 4].w : EntA[e * 4].w, fromB ? EntB[e * 4 + 1].w : EntA[e * 4 + 1].w);
+            vec2 motion = vec2(fromB ? EntB[e * 5].w : EntA[e * 5].w, fromB ? EntB[e * 5 + 1].w : EntA[e * 5 + 1].w);
             seeds[seedCount++] = uvDst - motion;
         }
         for (int chain = skyBehind ? 1 : 0; chain < 2 + seedCount; chain++) {
@@ -378,7 +392,7 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
                 w.flowed = abs(p.w) > 1.0e-12 && flowResidual(depthTex, clamp(uvSrc, 0.0, 1.0), p.xyz / p.w,
                         drawnByEntity(clamp(uvSrc, 0.0, 1.0), d, fromB), fromB) != vec2(0.0);
 #endif
-                w.entity = abs(p.w) > 1.0e-12 && drawnByEntity(clamp(uvSrc, 0.0, 1.0), d, fromB) && any(notEqual(entityMotion(p.xyz / p.w, fromB), vec3(0.0)));
+                w.entity = abs(p.w) > 1.0e-12 && drawnByEntity(clamp(uvSrc, 0.0, 1.0), d, fromB) && any(notEqual(entityMotion(p.xyz / p.w, fromB, 1.0), vec3(0.0)));
             }
         }
         w.near = haveHit ? bestHitNear : bestMissNear;
