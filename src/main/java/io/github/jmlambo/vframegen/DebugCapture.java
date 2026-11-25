@@ -23,6 +23,17 @@ public final class DebugCapture {
     private static boolean requested;
     private static Path dir;
     private static boolean sequenceRequested;
+    // F8 with the frame log on: the next BURST presented frames, real and generated, as PNGs in order
+    // (one generated frame alone did not show problems that only appear from frame to frame).
+    private static final int BURST = 24;
+    private static int burstLeft;
+    private static int burstIndex;
+    private static Path burstDir;
+    // Copied on the GPU while the burst runs (cheap); written to disk only after it, so the saving
+    // does not stall the frames being captured.
+    private static final GpuTexture[] burstTex = new GpuTexture[BURST];
+    private static final String[] burstNames = new String[BURST];
+    private static final StringBuilder burstLog = new StringBuilder();
 
     private DebugCapture() {
     }
@@ -30,6 +41,18 @@ public final class DebugCapture {
     public static void request() {
         requested = VFrameGen.config().debugCaptures;
         sequenceRequested = VFrameGen.config().debugFrameLog;
+        if (VFrameGen.config().debugCaptures && VFrameGen.config().debugFrameLog) {
+            burstDir = FabricLoader.getInstance().getGameDir().resolve("vframegen-debug")
+                    .resolve(Util.getFilenameFormattedDateTime() + "-burst");
+            try {
+                Files.createDirectories(burstDir);
+                burstLeft = BURST;
+                burstIndex = 0;
+                burstLog.setLength(0);
+            } catch (Exception e) {
+                VFrameGen.LOGGER.warn("Could not create {}", burstDir, e);
+            }
+        }
     }
 
     /** An extra line in the sequence log (not a frame). */
@@ -57,6 +80,42 @@ public final class DebugCapture {
         }
         record(String.format(java.util.Locale.ROOT, "%05d-%s t=%.2f ms %s", frameNumber++ % 100000, kind,
                 System.nanoTime() / 1e6 % 1_000_000, info));
+        if (burstLeft > 0) {
+            int i = burstIndex++;
+            String name = String.format(java.util.Locale.ROOT, "%02d-%s", i, kind);
+            burstLog.append(String.format(java.util.Locale.ROOT, "%s t=%.2f ms %s%n", name, System.nanoTime() / 1e6 % 1_000_000, info));
+            burstNames[i] = name;
+            if (texture != null) {
+                try {
+                    GpuTexture t = burstTex[i];
+                    if (t == null || t.getWidth(0) != texture.getWidth(0) || t.getHeight(0) != texture.getHeight(0)
+                            || t.getFormat() != texture.getFormat()) {
+                        if (t != null) t.close();
+                        t = RenderSystem.getDevice().createTexture("VFrameGen burst " + i,
+                                GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_COPY_SRC, texture.getFormat(),
+                                texture.getWidth(0), texture.getHeight(0), 1, 1);
+                        burstTex[i] = t;
+                    }
+                    RenderSystem.getDevice().createCommandEncoder().copyTextureToTexture(texture, t, 0, 0, 0, 0, 0,
+                            t.getWidth(0), t.getHeight(0));
+                } catch (RuntimeException e) {
+                    burstNames[i] = null;
+                    VFrameGen.LOGGER.warn("Burst capture: could not copy frame {}", i, e);
+                }
+            } else {
+                burstNames[i] = null;
+            }
+            if (--burstLeft == 0) {
+                for (int k = 0; k < burstIndex; k++) {
+                    if (burstNames[k] != null) save(burstDir, burstTex[k], burstNames[k]);
+                }
+                try {
+                    Files.writeString(burstDir.resolve("frames.txt"), burstLog.toString());
+                } catch (Exception ignored) {
+                }
+                VFrameGen.LOGGER.info("Saved a burst of {} frames to {}", burstIndex, burstDir);
+            }
+        }
         if (!sequenceRequested) return;
         sequenceRequested = false;
         Path out = FabricLoader.getInstance().getGameDir().resolve("vframegen-debug")
