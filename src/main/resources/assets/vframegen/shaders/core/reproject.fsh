@@ -60,7 +60,8 @@ layout(std140) uniform FrameGen {
     vec4 FlowParams; // x: optical flow on, y: trusted forward/backward disagreement (pixels^2), zw: texel value -> uv
     vec4 FlowLimits; // x: smallest residual used (pixels), y: largest, zw: measured image size (pixels)
     vec4 Out;        // x: output pixels per full-resolution pixel (the render scale in the LOWRES pass, else 1),
-                     // y: LOWRES reads NoHand, the image the real frames are upscaled from
+                     // y: LOWRES reads NoHand, the image the real frames are upscaled from,
+                     // z: World is the temporal upscaler's image (read with Catmull-Rom)
 };
 
 #ifdef COMPOSITE
@@ -224,7 +225,6 @@ bool offscreen(vec2 uv) {
 // NoHand is read only there: with render scale it is the low-resolution image from before the
 // upscaler, and reading it everywhere made generated frames soft next to the upscaled real frames
 // (fine textures such as water flickered between sharp and soft: shaking).
-#ifdef LOWRES
 // Catmull-Rom (5 bilinear reads). Reading between the pixels of the small image with bilinear
 // filtering blurred it, and the upscaler then enlarged that blur: generated frames came out softer
 // than the real ones, and distant detail flickered between sharp and soft.
@@ -247,7 +247,6 @@ vec3 catmullRom(sampler2D tex, vec2 uv) {
     float n = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;
     return max(r / n, vec3(0.0));
 }
-#endif
 
 vec3 sceneColor(sampler2D world, sampler2D noHand, sampler2D mask, vec2 uv, vec4 flags) {
 #ifdef LOWRES
@@ -272,7 +271,11 @@ vec3 sceneColor(sampler2D world, sampler2D noHand, sampler2D mask, vec2 uv, vec4
             }
         }
     }
-    return behindHand ? texture(noHand, uv).rgb : texture(world, uv).rgb;
+    if (behindHand) return texture(noHand, uv).rgb;
+    // The temporal upscaler's image (Out.z): sharp to the pixel, so a bilinear read between its
+    // pixels came out softer than the real frames around it, and fine textures such as grass shook
+    // between sharp and soft while moving.
+    return Out.z > 0.5 ? catmullRom(world, uv) : texture(world, uv).rgb;
 }
 
 Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampler2D noHand, sampler2D finalTex,

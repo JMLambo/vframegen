@@ -1434,7 +1434,8 @@ public final class FrameGenerator {
             // had right; above it, 0.05%, while burning mobs' fire was still followed.
             ub.putVec4(2.5f, 48f, flow != null ? flow.width : 0f, flow != null ? flow.height : 0f);
             ub.putVec4(lowRes ? (float) renderWidth / width : 1f,
-                    lowRes && cfg.upscaler != FrameGenConfig.Upscaler.TEMPORAL ? 1f : 0f, 0f, 0f);
+                    lowRes && cfg.upscaler != FrameGenConfig.Upscaler.TEMPORAL ? 1f : 0f,
+                    TemporalUpscaler.wanted() ? 1f : 0f, 0f);
             ByteBuffer data = ub.get();
             encoder.writeToBuffer(ubo.slice(), data);
         }
