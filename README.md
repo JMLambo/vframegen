@@ -266,7 +266,8 @@ frames.
   only be shown at the right moment when the GPU has some idle time between frames (see
   [Pacing](#pacing)). When it has none, which is typical on integrated graphics,
   each generated frame goes out late, just before the next real frame. Motion then judders: moving
-  mobs can look torn apart, and some screens flicker. The generated frames themselves are fine
+  mobs can look torn apart, and the whole screen can flicker in brightness. This only happens on
+  OpenGL. The generated frames themselves are fine
   (checked frame by frame on a Radeon 660M); only their timing is off. On Vulkan, generated frames
   are shown from their own thread at the right moment, and the same setup is smooth. VFrameGen
   notes it in the game log when it happens. Use Vulkan, or on integrated graphics use upscaling and
