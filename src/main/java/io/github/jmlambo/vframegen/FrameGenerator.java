@@ -423,6 +423,35 @@ public final class FrameGenerator {
     private boolean sliding;
     private int slideStartAdjust;
 
+    // Generated frames sent out without the present thread (OpenGL): how many were on time over
+    // five seconds. Without spare GPU time they go out late, just before the next real frame, and
+    // motion judders (moving mobs look torn; some screens flicker). Said once per session, in the log.
+    private int timingOn, timingLate, timingBadWindows;
+    private long timingWindowStart;
+    private boolean timingWarned;
+
+    private void noteGeneratedTiming(boolean onTime) {
+        if (timingWarned) return;
+        if (onTime) timingOn++;
+        else timingLate++;
+        long now = System.nanoTime();
+        if (timingWindowStart == 0) timingWindowStart = now;
+        if (now - timingWindowStart < 5_000_000_000L) return;
+        int total = timingOn + timingLate;
+        boolean bad = total >= 50 && timingLate * 10 > total * 3; // more than 30% late
+        timingBadWindows = bad ? timingBadWindows + 1 : 0;
+        if (timingBadWindows >= 2) {
+            timingWarned = true;
+            VFrameGen.LOGGER.warn("Generated frames cannot be timed evenly here: {}% of them went out late in the last five seconds "
+                            + "({} backend, the GPU has no time to spare between frames). Motion may judder and moving mobs may look torn. "
+                            + "Frame generation is smoothest on Vulkan, where generated frames are shown from their own thread; on a GPU "
+                            + "this busy, upscaling and anti-aliasing without frame generation may play better.",
+                    Math.round(100.0 * timingLate / total), backendName());
+        }
+        timingOn = timingLate = 0;
+        timingWindowStart = now;
+    }
+
     private void adaptCap() {
         // Changing the cap resets vanilla's limiter and the pacing estimate (one hitch each time),
         // so it changes rarely: down after two bad seconds in a row, up after ten roomy ones.
@@ -598,6 +627,7 @@ public final class FrameGenerator {
             long errNs = System.nanoTime() - due;
             if (errNs > -2_000_000L && errNs < 3_000_000L) fitCount++;
             else missCount++;
+            noteGeneratedTiming(errNs > -2_000_000L && errNs < 3_000_000L);
             if (!loopStart) {
                 try {
                     surface.acquireNextTexture();
