@@ -425,7 +425,7 @@ public final class FrameGenerator {
 
     // Generated frames sent out without the present thread (OpenGL): how many were on time over
     // five seconds. Without spare GPU time they go out late, just before the next real frame, and
-    // motion judders (moving mobs look torn; some screens flicker). Said once per session, in the log.
+    // motion judders (moving mobs look torn; the screen can flicker in brightness). Said once per session, in the log.
     private int timingOn, timingLate, timingBadWindows;
     private long timingWindowStart;
     private boolean timingWarned;
@@ -443,7 +443,7 @@ public final class FrameGenerator {
         if (timingBadWindows >= 2) {
             timingWarned = true;
             VFrameGen.LOGGER.warn("Generated frames cannot be timed evenly here: {}% of them went out late in the last five seconds "
-                            + "({} backend, the GPU has no time to spare between frames). Motion may judder and moving mobs may look torn. "
+                            + "({} backend, the GPU has no time to spare between frames). Motion may judder, moving mobs may look torn and the screen may flicker in brightness. "
                             + "Frame generation is smoothest on Vulkan, where generated frames are shown from their own thread; on a GPU "
                             + "this busy, upscaling and anti-aliasing without frame generation may play better.",
                     Math.round(100.0 * timingLate / total), backendName());
