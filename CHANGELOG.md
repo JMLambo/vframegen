@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.0-beta.8
+
 - Sharper generated frames with the Temporal upscaler: they read its image with a sharp filter
   instead of a plain blend between pixels, which made them about 5% softer than the real frames
   around them (fine textures such as grass shimmered between sharp and soft while moving). Now they
