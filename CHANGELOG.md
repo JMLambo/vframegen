@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Sharper generated frames with the Temporal upscaler: they read its image with a sharp filter
+  instead of a plain blend between pixels, which made them about 5% softer than the real frames
+  around them (fine textures such as grass shimmered between sharp and soft while moving). Now they
+  match.
+- New experimental setting, off by default: **Follow mobs turning** (Mod Menu → VFrameGen →
+  Quality). Generated frames also turn moving mobs with their body, not only move them. Uses the
+  game's own body rotation, so it works with model mods such as Entity Model Features. No visible
+  difference in tests yet.
+- On OpenGL, when the GPU has no time to spare between frames (typical on integrated graphics),
+  generated frames reach the screen late, right before the next real frame: motion judders, moving
+  mobs can look torn and the screen can flicker in brightness. Vulkan is not affected. VFrameGen now
+  says so once in the game log when it happens, and the README lists it under known issues.
+- Debug: with F8 captures and the frame log both on, F8 also saves the next 24 frames in a row.
+- Correction to the 1.0.0-beta.7 notes: the optical-flow edge fix applies to both kinds of optical
+  flow (NVIDIA hardware and the shader version on other GPUs), not only NVIDIA. It was measured on
+  NVIDIA.
+
 ## 1.0.0-beta.7
 
 - More real fps with frame generation on a GPU that is already busy. The auto frame cap lowered the
