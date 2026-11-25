@@ -8,15 +8,13 @@
 // keeps a full-resolution history and, for every output pixel:
 //   1. reconstructs the current frame's colour there from the nearby low-resolution samples,
 //      weighted by how close each sample's (shifted) position is to the pixel centre;
-//   2. finds where the pixel was in the last frame (depth + camera motion, and the motion of a
-//      moving entity when the pixel is on one) and reads the history there;
+//   2. finds where the pixel was in the last frame (depth + camera motion) and reads the history
+//      there;
 //   3. clips that history to the range of colours around the pixel in the current frame, so
 //      anything that changed (disocclusion, moving mobs, lighting) does not ghost;
-//   4. blends the current frame in by how much each holds: the history keeps a per-pixel weight
-//      (alpha) of the samples it gathered, so newly uncovered pixels sharpen within a few frames
-//      and settled ones stay steady.
-// Over a few frames the history fills in detail at full resolution (the jitter cycle is longer at
-// lower render scales). At 100% render scale it is plain temporal anti-aliasing.
+//   4. blends a little of the current frame in: more where a sample landed close to the pixel.
+// Over a few frames the history fills in detail at full resolution. At 100% render scale it is
+// plain temporal anti-aliasing.
 
 uniform sampler2D Color;   // this frame, low resolution (texelFetch; linear for the held item)
 uniform sampler2D Depth;   // its depth, before the held item
@@ -31,15 +29,9 @@ layout(std140) uniform Taau {
     vec4 LowSize;        // xy: size, zw: 1/size
     vec4 FullSize;       // xy: size, zw: 1/size
     vec4 Jitter;         // xy: this frame's shift in low-res pixels, z: reset, w: hand valid
-    vec4 Flags;          // x: reversed Z, y: depth zero-to-one, z: PrevDepth valid, w: entity count
+    vec4 Flags;          // x: reversed Z, y: depth zero-to-one, z: PrevDepth valid
     vec4 CamDelta;       // xyz: this camera minus the last one
-    vec4 Ent[48];        // per moving entity: box min, box max (relative to this camera), its motion since the last frame
 };
-
-// History alpha: 1 = held item; otherwise the sample weight the pixel has gathered
-// (its confidence), times ALPHA_SCALE, up to MAX_FRAMES.
-const float MAX_FRAMES = 8.0;
-const float ALPHA_SCALE = 0.9 / MAX_FRAMES;
 
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
@@ -87,21 +79,6 @@ vec3 clipToBox(vec3 h, vec3 lo, vec3 hi) {
     vec3 a = abs(v / extent);
     float m = max(a.x, max(a.y, a.z));
     return m > 1.0 ? center + v / m : h;
-}
-
-// How far last frame's depth at p's spot then is from p's distance then (relative): small when p
-// was visible there. p is relative to this frame's camera.
-float depthError(vec3 p) {
-    vec4 c = PrevViewProj * vec4(p, 1.0);
-    if (c.w <= 1.0e-6) return 1.0e9;
-    vec2 puv = (c.xy / c.w) * 0.5 + 0.5;
-    if (any(lessThan(puv, vec2(0.0))) || any(greaterThan(puv, vec2(1.0)))) return 1.0e9;
-    float s = texelFetch(PrevDepth, clamp(ivec2(puv * LowSize.xy), ivec2(0), ivec2(LowSize.xy) - 1), 0).r;
-    if (isSky(s)) return 1.0e9;
-    float pz = Flags.y > 0.5 ? s : s * 2.0 - 1.0;
-    vec4 q = PrevInvViewProj * vec4(puv * 2.0 - 1.0, pz, 1.0);
-    float expected = length(p + CamDelta.xyz);
-    return abs(length(q.xyz / q.w) - expected) / max(expected, 0.05);
 }
 
 void main() {
@@ -157,10 +134,8 @@ void main() {
         fragColor = vec4(texture(Color, uv).rgb, 1.0);
         return;
     }
-    // A new pixel starts with the filtered colour and one sample's worth of confidence.
-    vec4 fresh = vec4(current, ALPHA_SCALE * max(wmax, 0.05));
     if (Jitter.z > 0.5) {
-        fragColor = fresh;
+        fragColor = vec4(current, 0.0);
         return;
     }
 
@@ -180,43 +155,22 @@ void main() {
         float ndcZ = Flags.y > 0.5 ? closest : closest * 2.0 - 1.0;
         vec4 p = CurInvViewProj * vec4(ndc, ndcZ, 1.0);
         here = p.xyz / p.w;
-        // Inside a moving entity's box: the pixel shows either the entity (it was where the entity
-        // was, minus its motion) or what is around it (it stayed put). The one that agrees with
-        // last frame's depth wins; without that depth, the entity.
-        int count = int(Flags.w + 0.5);
-        for (int i = 0; i < count; i++) {
-            vec3 lo = Ent[i * 3].xyz, hi = Ent[i * 3 + 1].xyz;
-            if (any(lessThan(here, lo)) || any(greaterThan(here, hi))) continue;
-            vec3 moved = here - Ent[i * 3 + 2].xyz;
-            if (Flags.z < 0.5 || depthError(moved) < depthError(here)) here = moved;
-            break;
-        }
         prevClip = PrevViewProj * vec4(here, 1.0);
     }
     if (prevClip.w <= 1.0e-6) {
-        fragColor = fresh;
+        fragColor = vec4(current, 0.0);
         return;
     }
     vec2 prevUv = (prevClip.xy / prevClip.w) * 0.5 + 0.5;
     if (any(lessThan(prevUv, vec2(0.0))) || any(greaterThan(prevUv, vec2(1.0)))) {
-        fragColor = fresh;
+        fragColor = vec4(current, 0.0);
         return;
     }
-    // The held item was there last frame (any of the texels the history read blends with a
-    // weight above zero): its colour is not the world's.
-    vec2 hp = prevUv * FullSize.xy - 0.5;
-    ivec2 ht = ivec2(floor(hp));
-    vec2 hf = hp - vec2(ht);
-    ivec2 hmax = ivec2(FullSize.xy) - 1;
-    float handPrev = texelFetch(History, clamp(ht, ivec2(0), hmax), 0).a;
-    if (hf.x > 1.0e-3) handPrev = max(handPrev, texelFetch(History, clamp(ht + ivec2(1, 0), ivec2(0), hmax), 0).a);
-    if (hf.y > 1.0e-3) handPrev = max(handPrev, texelFetch(History, clamp(ht + ivec2(0, 1), ivec2(0), hmax), 0).a);
-    if (hf.x > 1.0e-3 && hf.y > 1.0e-3) handPrev = max(handPrev, texelFetch(History, clamp(ht + ivec2(1, 1), ivec2(0), hmax), 0).a);
-    if (handPrev > 0.95) {
-        fragColor = fresh;
+    // The held item was there last frame: its colour is not the world's.
+    if (texture(History, prevUv).a > 0.01) {
+        fragColor = vec4(current, 0.0);
         return;
     }
-    float frames = texture(History, prevUv).a / ALPHA_SCALE;
     // Something else was in front last frame (newly uncovered): the history there shows that, not
     // this surface. Compared by distance from the last camera, with some slack (jitter, slopes).
     if (Flags.z > 0.5 && !sky) {
@@ -241,7 +195,7 @@ void main() {
             rejected = seen < expected - (0.05 * expected + 0.15);
         }
         if (rejected) {
-            fragColor = fresh;
+            fragColor = vec4(current, 0.0);
             return;
         }
     }
@@ -250,27 +204,16 @@ void main() {
     vec3 mean = m1 / max(taps, 1.0);
     vec3 sigma = sqrt(max(m2 / max(taps, 1.0) - mean * mean, vec3(0.0)));
     vec3 lo = mean - 1.25 * sigma, hi = mean + 1.25 * sigma;
-    vec3 raw = toYCoCg(history);
-    vec3 clipped = clipToBox(raw, lo, hi);
-    history = fromYCoCg(clipped);
-    // The more the history had to be pulled in, the less it is trusted from here on: it drops
-    // its confidence (lighting changes, smears) and recovers within a few frames.
-    float pulled = clamp(length(raw - clipped) / (length(hi - lo) * 0.5 + 0.02), 0.0, 1.0);
+    history = fromYCoCg(clipToBox(toYCoCg(history), lo, hi));
 
     // Each frame adds its sample nearest the pixel, by how near it is: averaging all the samples
-    // around would blur the textures. While the pixel has little history (just uncovered), the
-    // filtered colour stands in, so it starts smooth and sharpens as samples come in.
+    // around (the filtered colour above, used only for new pixels) would blur the textures.
+    current = nearest;
     vec2 motionPx = (uv - prevUv) * FullSize.xy;
     float motion = clamp(length(motionPx) / 16.0, 0.0, 1.0);
-    float held = frames * (1.0 - 0.75 * pulled);
-    float w = max(wmax, 0.05);
-    current = mix(current, nearest, clamp(held / 2.0, 0.0, 1.0));
-    // Weighted by samples: the history counts as the sample weight it gathered, at most a few
-    // frames' worth (fewer while moving, where the history read itself blurs a little).
-    held = min(held, mix(6.0, 2.0, motion));
-    float alpha = clamp(w / (w + held), 0.02, 1.0);
+    float alpha = clamp(0.25 * wmax + motion * 0.15, 0.02, 1.0);
     // Blend in a tonemapped space so a single bright sample does not flicker.
     float wc = alpha / (1.0 + dot(current, vec3(0.299, 0.587, 0.114)));
     float wh = (1.0 - alpha) / (1.0 + dot(history, vec3(0.299, 0.587, 0.114)));
-    fragColor = vec4((current * wc + history * wh) / (wc + wh), ALPHA_SCALE * min(held + w, MAX_FRAMES));
+    fragColor = vec4((current * wc + history * wh) / (wc + wh), 0.0);
 }

@@ -43,33 +43,19 @@ import java.util.Optional;
  * <p>Per frame: {@link #beginLevel} shifts the camera projection (restored in {@link #endLevel}),
  * {@link #captureDepth} and {@link #captureHand} copy the world's depth (before the held item) and
  * the held item's depth, and {@link #resolve} writes the new history, which then becomes the
- * displayed image. The history follows the camera and the nearest moving entities. Shader packs
- * have their own temporal anti-aliasing and jitter; with one on, this falls back to the
- * edge-adaptive upscaler.
+ * displayed image. Shader packs have their own temporal anti-aliasing and jitter; with one on,
+ * this falls back to the edge-adaptive upscaler.
  */
 public final class TemporalUpscaler {
-    // Moving entities whose motion the history follows (nearest first).
-    static final int MAX_ENTITIES = 16;
-    private static final int UBO_SIZE = 64 * 3 + 16 * 5 + 16 * 3 * MAX_ENTITIES;
-    // Halton (2, 3) sub-pixel positions. The cycle is longer at lower render scales (as in FSR 2:
-    // 8 per output pixel's share of a low-res pixel), so every output pixel gets several samples.
-    private static final int MAX_PHASES = 32;
-    private static final float[][] JITTER = new float[MAX_PHASES][2];
+    private static final int UBO_SIZE = 64 * 3 + 16 * 5;
+    // Halton (2, 3): well spread sub-pixel positions, 8 per cycle.
+    private static final float[][] JITTER = new float[8][2];
     static {
-        for (int i = 0; i < MAX_PHASES; i++) {
+        for (int i = 0; i < 8; i++) {
             JITTER[i][0] = halton(i + 1, 2) - 0.5f;
             JITTER[i][1] = halton(i + 1, 3) - 0.5f;
         }
     }
-
-    // This frame's moving entities (relative to the camera: box, motion since the last frame) and
-    // the last frame's positions by id, to measure that motion.
-    private static int entityCount;
-    private static final float[] entityData = new float[MAX_ENTITIES * 9];
-    private static it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap<double[]> prevEntityPos = new it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap<>();
-    private static it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap<double[]> nextEntityPos = new it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap<>();
-    // Position records, reused from frame to frame.
-    private static final java.util.ArrayDeque<double[]> spare = new java.util.ArrayDeque<>();
 
     private static boolean jittered;   // this frame's projection is shifted
     private static boolean ran;        // this frame was resolved
@@ -170,8 +156,7 @@ public final class TemporalUpscaler {
         RenderTarget main = gr.mainRenderTarget();
         lowW = main.width;
         lowH = main.height;
-        int phases = (int) Math.clamp(Math.ceil(8.0 / (scale * scale)), 8, MAX_PHASES);
-        frameIndex = (frameIndex + 1) % phases;
+        frameIndex = (frameIndex + 1) & 7;
         jitterX = JITTER[frameIndex][0];
         jitterY = JITTER[frameIndex][1];
         CameraRenderState cam = gr.gameRenderState().levelRenderState.cameraRenderState;
@@ -264,24 +249,20 @@ public final class TemporalUpscaler {
             boolean usePrevDepth = prevDepthValid && !reset;
             boolean zeroToOne = RenderSystem.getDevice().getDeviceInfo().isZZeroToOne();
             boolean reversedZ = ndcDepth(curProj, 1f) > ndcDepth(curProj, 100f);
-            captureEntities(cam, reset);
 
             int src = current, dst = current ^ 1;
             CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
             try (MemoryStack stack = MemoryStack.stackPush()) {
-                Std140Builder builder = Std140Builder.onStack(stack, UBO_SIZE)
+                ByteBuffer data = Std140Builder.onStack(stack, UBO_SIZE)
                         .putMat4f(curInv)
                         .putMat4f(prev)
                         .putMat4f(prevInvViewProj)
                         .putVec4(lowW, lowH, 1f / lowW, 1f / lowH)
                         .putVec4(fullW, fullH, 1f / fullW, 1f / fullH)
                         .putVec4(jitterX, jitterY, reset ? 1f : 0f, handCaptured ? 1f : 0f)
-                        .putVec4(reversedZ ? 1f : 0f, zeroToOne ? 1f : 0f, usePrevDepth ? 1f : 0f, entityCount)
-                        .putVec4((float) (pos.x - prevPos.x), (float) (pos.y - prevPos.y), (float) (pos.z - prevPos.z), 0f);
-                for (int i = 0; i < MAX_ENTITIES * 3; i++) {
-                    builder.putVec4(entityData[i * 3], entityData[i * 3 + 1], entityData[i * 3 + 2], 0f);
-                }
-                ByteBuffer data = builder.get();
+                        .putVec4(reversedZ ? 1f : 0f, zeroToOne ? 1f : 0f, usePrevDepth ? 1f : 0f, 0f)
+                        .putVec4((float) (pos.x - prevPos.x), (float) (pos.y - prevPos.y), (float) (pos.z - prevPos.z), 0f)
+                        .get();
                 encoder.writeToBuffer(ubo.slice(), data);
             }
             GpuSampler nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
@@ -310,81 +291,6 @@ public final class TemporalUpscaler {
             disable(e);
             return null;
         }
-    }
-
-    private static final net.minecraft.world.entity.Entity[] near = new net.minecraft.world.entity.Entity[MAX_ENTITIES];
-    private static final double[] nearDist = new double[MAX_ENTITIES];
-
-    /**
-     * The nearest entities that moved since the last frame: their box (padded hitbox, relative to
-     * the camera) and that motion. The shader decides per pixel whether it shows the entity or what
-     * is around it (whichever matches the last frame's depth), so the box can be loose.
-     */
-    private static void captureEntities(CameraRenderState cam, boolean reset) {
-        entityCount = 0;
-        nextEntityPos.clear();
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.level != null) {
-            var ticks = mc.level.tickRateManager();
-            var delta = mc.getDeltaTracker();
-            net.minecraft.world.entity.Entity camera = mc.getCameraEntity();
-            int n = 0;
-            for (net.minecraft.world.entity.Entity e : mc.level.entitiesForRendering()) {
-                if (e == camera && cam.isFirstPerson) continue;
-                // The partial tick its renderer uses (frozen entities stay put during /tick freeze).
-                float pt = delta.getGameTimeDeltaPartialTick(!ticks.isEntityFrozen(e));
-                double x = net.minecraft.util.Mth.lerp(pt, e.xo, e.getX());
-                double y = net.minecraft.util.Mth.lerp(pt, e.yo, e.getY());
-                double z = net.minecraft.util.Mth.lerp(pt, e.zo, e.getZ());
-                double dx = x - cam.pos.x, dy = y - cam.pos.y, dz = z - cam.pos.z;
-                double d2 = dx * dx + dy * dy + dz * dz;
-                if (d2 > 96.0 * 96.0) continue;
-                double[] rec = spare.isEmpty() ? new double[3] : spare.pop();
-                rec[0] = x;
-                rec[1] = y;
-                rec[2] = z;
-                nextEntityPos.put(e.getId(), rec);
-                double[] before = prevEntityPos.get(e.getId());
-                if (reset || before == null) continue;
-                double mx = x - before[0], my = y - before[1], mz = z - before[2];
-                double m2 = mx * mx + my * my + mz * mz;
-                if (m2 < 1.0e-8 || m2 > 64.0) continue;
-                if (n == MAX_ENTITIES && d2 >= nearDist[n - 1]) continue;
-                int k = n < MAX_ENTITIES ? n++ : n - 1;
-                while (k > 0 && nearDist[k - 1] > d2) {
-                    nearDist[k] = nearDist[k - 1];
-                    near[k] = near[k - 1];
-                    k--;
-                }
-                nearDist[k] = d2;
-                near[k] = e;
-            }
-            for (int k = 0; k < n; k++) {
-                net.minecraft.world.entity.Entity e = near[k];
-                near[k] = null;
-                double[] now = nextEntityPos.get(e.getId());
-                double[] before = prevEntityPos.get(e.getId());
-                // Models reach past the hitbox (heads, arms, model mods): padded.
-                net.minecraft.world.phys.AABB hit = e.getBoundingBox().move(-e.getX(), -e.getY(), -e.getZ());
-                float ox = (float) (now[0] - cam.pos.x), oy = (float) (now[1] - cam.pos.y), oz = (float) (now[2] - cam.pos.z);
-                int j = entityCount++ * 9;
-                entityData[j] = ox + (float) hit.minX - 0.35f;
-                entityData[j + 1] = oy + (float) hit.minY - 0.05f;
-                entityData[j + 2] = oz + (float) hit.minZ - 0.35f;
-                entityData[j + 3] = ox + (float) hit.maxX + 0.35f;
-                entityData[j + 4] = oy + (float) hit.maxY + 0.4f;
-                entityData[j + 5] = oz + (float) hit.maxZ + 0.35f;
-                entityData[j + 6] = (float) (now[0] - before[0]);
-                entityData[j + 7] = (float) (now[1] - before[1]);
-                entityData[j + 8] = (float) (now[2] - before[2]);
-            }
-        }
-        java.util.Arrays.fill(entityData, entityCount * 9, entityData.length, 0f);
-        spare.addAll(prevEntityPos.values());
-        prevEntityPos.clear();
-        var swap = prevEntityPos;
-        prevEntityPos = nextEntityPos;
-        nextEntityPos = swap;
     }
 
     private static float ndcDepth(Matrix4f proj, float distance) {
