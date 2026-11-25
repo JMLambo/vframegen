@@ -51,10 +51,10 @@ layout(std140) uniform FrameGen {
     vec4 BFlags;
     vec4 Mix;      // x: position between A (0) and B (1)
     vec4 EntCount; // x: entities in A, y: in B, z/w: TerrainA/B valid
-    // Per source, 32 x (box min (w: screen motion x), box max (w: y), motion to the output frame,
-    // screen rectangle in the output), relative to its camera.
-    vec4 EntA[128];
-    vec4 EntB[128];
+    // Per source, 32 x (box min (w: screen motion x), box max (w: y), motion to the output frame (w:
+    // body turn, radians), screen rectangle in the output, position it turns about), relative to its camera.
+    vec4 EntA[160];
+    vec4 EntB[160];
     mat4 AToB;      // position relative to A's camera -> B clip (optical flow)
     mat4 BToA;      // position relative to B's camera -> A clip
     vec4 FlowParams; // x: optical flow on, y: trusted forward/backward disagreement (pixels^2), zw: texel value -> uv
@@ -110,15 +110,22 @@ vec3 projectDirection(vec2 uvDst, mat4 srcViewProjRot) {
     return vec3((clip.xy / clip.w) * 0.5 + 0.5, 1.0);
 }
 
-// A point (relative to the source camera) inside a moving entity's box moves with it as well.
-// Root motion only, so it is the same for any model or animation mod.
+// A point (relative to the source camera) inside a moving entity's box moves with it as well:
+// its root motion, and with entityRotation (experimental) its body turning about its position (w
+// of the motion, radians; 0 otherwise). Not the limbs or head, so it is the same for any model or
+// animation mod.
 vec3 entityMotion(vec3 p, bool fromB) {
     int n = int(fromB ? EntCount.y : EntCount.x);
     for (int i = 0; i < n; i++) {
-        vec3 lo = fromB ? EntB[i * 4].xyz : EntA[i * 4].xyz;
-        vec3 hi = fromB ? EntB[i * 4 + 1].xyz : EntA[i * 4 + 1].xyz;
+        vec3 lo = fromB ? EntB[i * 5].xyz : EntA[i * 5].xyz;
+        vec3 hi = fromB ? EntB[i * 5 + 1].xyz : EntA[i * 5 + 1].xyz;
         if (all(greaterThanEqual(p, lo)) && all(lessThanEqual(p, hi))) {
-            return fromB ? EntB[i * 4 + 2].xyz : EntA[i * 4 + 2].xyz;
+            vec4 m = fromB ? EntB[i * 5 + 2] : EntA[i * 5 + 2];
+            vec3 pivot = fromB ? EntB[i * 5 + 4].xyz : EntA[i * 5 + 4].xyz;
+            vec2 r = p.xz - pivot.xz;
+            float c = cos(m.w), s = sin(m.w);
+            vec2 turned = vec2(r.x * c - r.y * s, r.x * s + r.y * c);
+            return m.xyz + vec3(turned.x - r.x, 0.0, turned.y - r.y);
         }
     }
     return vec3(0.0);
@@ -333,9 +340,9 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
         int seedCount = 0;
         int ents = int(fromB ? EntCount.y : EntCount.x);
         for (int e = 0; e < ents && seedCount < 4; e++) {
-            vec4 rect = fromB ? EntB[e * 4 + 3] : EntA[e * 4 + 3];
+            vec4 rect = fromB ? EntB[e * 5 + 3] : EntA[e * 5 + 3];
             if (uvDst.x < rect.x || uvDst.y < rect.y || uvDst.x > rect.z || uvDst.y > rect.w) continue;
-            vec2 motion = vec2(fromB ? EntB[e * 4].w : EntA[e * 4].w, fromB ? EntB[e * 4 + 1].w : EntA[e * 4 + 1].w);
+            vec2 motion = vec2(fromB ? EntB[e * 5].w : EntA[e * 5].w, fromB ? EntB[e * 5 + 1].w : EntA[e * 5 + 1].w);
             seeds[seedCount++] = uvDst - motion;
         }
         for (int chain = skyBehind ? 1 : 0; chain < 2 + seedCount; chain++) {

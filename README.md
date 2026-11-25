@@ -236,10 +236,13 @@ Toggle key: **F9** (rebind under Controls → VFrameGen).
 - **Limits**: when not to generate frames (camera jumps, fast turns, very slow real frames).
 - **Quality**: sharpening of generated frames, anti-aliasing and its quality, motion blur, optical
   flow (beta; its tooltip says whether your GPU uses hardware or the experimental shader version),
-  GUI detection threshold.
+  following mobs turning (experimental, off by default: generated frames also turn moving mobs
+  with their body rotation, not just move them; no visible difference in tests so far), GUI
+  detection threshold.
 - **Debug** (all off by default): a magenta tint on generated frames, F8 captures (images and
-  validation frames go to `vframegen-debug/`), a rolling log of the last ~10 s of presented frames,
-  and stats, pacing and stall lines in the game log.
+  validation frames go to `vframegen-debug/`; with the frame log on too, F8 also saves the next 24
+  frames in a row), a rolling log of the last ~10 s of presented frames, and stats, pacing and
+  stall lines in the game log.
 
 The F3 screen shows `VFrameGen: N real + M generated`, and the FPS counter includes generated
 frames.

@@ -35,6 +35,8 @@ final class FrameSlot {
     final float[] entityBox = new float[MAX_ENTITIES * 6];
     /** Each entity's velocity, blocks per second (motion blur). */
     final float[] entityVel = new float[MAX_ENTITIES * 3];
+    /** Body rotation (yaw, degrees) the model is drawn with. */
+    final float[] entityYaw = new float[MAX_ENTITIES];
     final Matrix4f viewRot = new Matrix4f();
     final Matrix4f proj = new Matrix4f();
     // Debug: both candidates for proj, with and without vanilla's view bobbing.

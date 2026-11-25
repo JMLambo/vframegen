@@ -76,7 +76,7 @@ public final class FrameGenerator {
      */
     private static final float LOCKED_DISTANCE = 0.2f;
     // + entity count, and per source FrameSlot.MAX_ENTITIES x (box min, box max, motion).
-    private static final int UBO_SIZE = 7 * 64 + 6 * 16 + 2 * FrameSlot.MAX_ENTITIES * 4 * 16 + 2 * 64 + 3 * 16;
+    private static final int UBO_SIZE = 7 * 64 + 6 * 16 + 2 * FrameSlot.MAX_ENTITIES * 5 * 16 + 2 * 64 + 3 * 16;
 
     /** What vanilla's blit + present show at the end of this loop. */
     public enum Present { VANILLA, HELD }
@@ -1518,13 +1518,18 @@ public final class FrameGenerator {
                 double dx = other.entityPos[j * 3] - src.entityPos[i * 3];
                 double dy = other.entityPos[j * 3 + 1] - src.entityPos[i * 3 + 1];
                 double dz = other.entityPos[j * 3 + 2] - src.entityPos[i * 3 + 2];
-                if (dx * dx + dy * dy + dz * dz < 1.0e-8 || dx * dx + dy * dy + dz * dz > 64.0) continue; // still, or teleported
+                // Body rotation too (setting entityRotation, experimental): it turns the mob as well.
+                float turn = VFrameGen.config().entityRotation
+                        ? (float) Math.toRadians(net.minecraft.util.Mth.wrapDegrees(other.entityYaw[j] - src.entityYaw[i])) : 0f;
+                double moved2 = dx * dx + dy * dy + dz * dz;
+                if ((moved2 < 1.0e-8 && Math.abs(turn) < 1.0e-4f) || moved2 > 64.0) continue; // still, or teleported
                 if (ub != null) {
                     float ox = (float) (src.entityPos[i * 3] - src.pos.x);
                     float oy = (float) (src.entityPos[i * 3 + 1] - src.pos.y);
                     float oz = (float) (src.entityPos[i * 3 + 2] - src.pos.z);
                     float[] bx = src.entityBox;
                     float mx = (float) dx * f, my = (float) dy * f, mz = (float) dz * f;
+                    float rot = turn * f, rc = (float) Math.cos(rot), rs = (float) Math.sin(rot);
                     float x0 = ox + bx[i * 6], y0 = oy + bx[i * 6 + 1], z0 = oz + bx[i * 6 + 2];
                     float x1 = ox + bx[i * 6 + 3], y1 = oy + bx[i * 6 + 4], z1 = oz + bx[i * 6 + 5];
                     // Screen motion of the box centre, and the moved box's rectangle in the output.
@@ -1539,8 +1544,10 @@ public final class FrameGenerator {
                         boolean front = true;
                         float ux0 = 2f, uy0 = 2f, ux1 = -1f, uy1 = -1f;
                         for (int k = 0; k < 8 && front; k++) {
+                            // The corner turned about the entity's position, then moved.
+                            float kx = ((k & 1) == 0 ? x0 : x1) - ox, kz = ((k & 4) == 0 ? z0 : z1) - oz;
                             org.joml.Vector4f c = dstViewProj.transform(entCorner.set(
-                                    ((k & 1) == 0 ? x0 : x1) + mx, ((k & 2) == 0 ? y0 : y1) + my, ((k & 4) == 0 ? z0 : z1) + mz, 1f));
+                                    ox + kx * rc - kz * rs + mx, ((k & 2) == 0 ? y0 : y1) + my, oz + kx * rs + kz * rc + mz, 1f));
                             if (c.w <= 1.0e-4f) {
                                 front = false;
                                 break;
@@ -1560,15 +1567,17 @@ public final class FrameGenerator {
                     }
                     ub.putVec4(x0, y0, z0, su);
                     ub.putVec4(x1, y1, z1, sv);
-                    ub.putVec4(mx, my, mz, 0f);
+                    ub.putVec4(mx, my, mz, rot);
                     ub.putVec4(rx0, ry0, rx1, ry1);
+                    ub.putVec4(ox, oy, oz, 0f);
                 }
                 n++;
             }
         }
         if (ub != null) {
             for (int i = n; i < FrameSlot.MAX_ENTITIES; i++) {
-                ub.putVec4(0f, 0f, 0f, 0f).putVec4(-1f, -1f, -1f, 0f).putVec4(0f, 0f, 0f, 0f).putVec4(2f, 2f, -1f, -1f);
+                ub.putVec4(0f, 0f, 0f, 0f).putVec4(-1f, -1f, -1f, 0f).putVec4(0f, 0f, 0f, 0f).putVec4(2f, 2f, -1f, -1f)
+                        .putVec4(0f, 0f, 0f, 0f);
             }
         }
         return n;
@@ -1676,6 +1685,10 @@ public final class FrameGenerator {
             c.entityVel[i * 3] = (float) ((e.getX() - e.xo) * tps);
             c.entityVel[i * 3 + 1] = (float) ((e.getY() - e.yo) * tps);
             c.entityVel[i * 3 + 2] = (float) ((e.getZ() - e.zo) * tps);
+            // The body's rotation as drawn (living entities turn their body; others their whole model).
+            c.entityYaw[i] = e instanceof net.minecraft.world.entity.LivingEntity le
+                    ? net.minecraft.util.Mth.rotLerp(pt, le.yBodyRotO, le.yBodyRot)
+                    : net.minecraft.util.Mth.rotLerp(pt, e.yRotO, e.getYRot());
         }
     }
 

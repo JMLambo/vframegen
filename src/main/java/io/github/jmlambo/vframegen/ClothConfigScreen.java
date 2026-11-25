@@ -154,6 +154,9 @@ final class ClothConfigScreen {
                 .setTooltip(tip(OpticalFlow.settingTooltipKey()))
                 .setRequirement(OpticalFlow::usable)
                 .setSaveConsumer(v -> cfg.opticalFlow = v).build());
+        quality.addEntry(e.startBooleanToggle(t("entityRotation"), cfg.entityRotation)
+                .setDefaultValue(def.entityRotation).setTooltip(tip("entityRotation"))
+                .setSaveConsumer(v -> cfg.entityRotation = v).build());
         quality.addEntry(e.startFloatField(t("guiDiffThreshold"), cfg.guiDiffThreshold)
                 .setDefaultValue(def.guiDiffThreshold).setMin(0).setMax(0.5f).setTooltip(tip("guiDiffThreshold"))
                 .setSaveConsumer(v -> cfg.guiDiffThreshold = v).build());
