@@ -193,8 +193,8 @@ public final class FrameGenerator {
         if (lastScreenNs != 0 && t >= lastScreenNs) {
             double g = (t - lastScreenNs) / 1e6;
             if (g < 250) {
-                if (lastScreenReal && !real) { gapRgSum += g; gapRgN++; }
-                if (!lastScreenReal && real) { gapGrSum += g; gapGrN++; }
+                if (lastScreenReal && !real) { gapRgSum += g; gapRgN++; unevenRg += g; unevenRgN++; }
+                if (!lastScreenReal && real) { gapGrSum += g; gapGrN++; unevenGr += g; unevenGrN++; }
                 gapScrMin = Math.min(gapScrMin, g);
                 gapScrMax = Math.max(gapScrMax, g);
                 gapBuckets[g < 4 ? 0 : g < 8 ? 1 : g < 12 ? 2 : g < 20 ? 3 : g < 30 ? 4 : 5]++;
@@ -202,6 +202,43 @@ public final class FrameGenerator {
         }
         lastScreenNs = Math.max(t, lastScreenNs);
         lastScreenReal = real;
+        checkUneven(t);
+    }
+
+    // Without the present thread (OpenGL), generated frames can only go out on time when the GPU has
+    // idle time between frames. With none they go out late, just before the next real frame (a
+    // Radeon 660M: 24 ms after a real frame, then the real one 1.5 ms later), and motion judders
+    // (moving mobs look torn; the screen can flicker in brightness). Judged on the gaps on screen:
+    // an RTX 4050 on OpenGL missed the exact due times as often but its gaps were even (6.3 / 7.6 ms).
+    // Said once per session, in the log.
+    private double unevenRg, unevenGr;
+    private int unevenRgN, unevenGrN, unevenWindows;
+    private long unevenWindowStart;
+    private boolean unevenWarned;
+
+    private void checkUneven(long now) {
+        if (unevenWarned) return;
+        if (unevenWindowStart == 0) unevenWindowStart = now;
+        if (now - unevenWindowStart < 5_000_000_000L) return;
+        boolean bad = false;
+        if (!presentThreadActive() && unevenRgN >= 50 && unevenGrN >= 50) {
+            double rg = unevenRg / unevenRgN, gr = unevenGr / unevenGrN;
+            bad = Math.max(rg, gr) > 3.0 * Math.max(0.1, Math.min(rg, gr));
+            unevenWindows = bad ? unevenWindows + 1 : 0;
+            if (unevenWindows >= 2) {
+                unevenWarned = true;
+                VFrameGen.LOGGER.warn("Generated frames cannot be shown evenly here: on screen, {} ms after a real frame, then {} ms "
+                                + "until the next one ({} backend; the GPU has no time to spare between frames). Motion may judder, "
+                                + "moving mobs may look torn and the screen may flicker in brightness. Frame generation is smoothest "
+                                + "on Vulkan, where generated frames are shown from their own thread; on a GPU this busy, upscaling "
+                                + "and anti-aliasing without frame generation may play better.",
+                        String.format(Locale.ROOT, "%.1f", rg), String.format(Locale.ROOT, "%.1f", gr), backendName());
+            }
+        }
+        if (!bad) unevenWindows = 0;
+        unevenRg = unevenGr = 0;
+        unevenRgN = unevenGrN = 0;
+        unevenWindowStart = now;
     }
 
     private void logPacing() {
@@ -423,35 +460,6 @@ public final class FrameGenerator {
     private boolean sliding;
     private int slideStartAdjust;
 
-    // Generated frames sent out without the present thread (OpenGL): how many were on time over
-    // five seconds. Without spare GPU time they go out late, just before the next real frame, and
-    // motion judders (moving mobs look torn; the screen can flicker in brightness). Said once per session, in the log.
-    private int timingOn, timingLate, timingBadWindows;
-    private long timingWindowStart;
-    private boolean timingWarned;
-
-    private void noteGeneratedTiming(boolean onTime) {
-        if (timingWarned) return;
-        if (onTime) timingOn++;
-        else timingLate++;
-        long now = System.nanoTime();
-        if (timingWindowStart == 0) timingWindowStart = now;
-        if (now - timingWindowStart < 5_000_000_000L) return;
-        int total = timingOn + timingLate;
-        boolean bad = total >= 50 && timingLate * 10 > total * 3; // more than 30% late
-        timingBadWindows = bad ? timingBadWindows + 1 : 0;
-        if (timingBadWindows >= 2) {
-            timingWarned = true;
-            VFrameGen.LOGGER.warn("Generated frames cannot be timed evenly here: {}% of them went out late in the last five seconds "
-                            + "({} backend, the GPU has no time to spare between frames). Motion may judder, moving mobs may look torn and the screen may flicker in brightness. "
-                            + "Frame generation is smoothest on Vulkan, where generated frames are shown from their own thread; on a GPU "
-                            + "this busy, upscaling and anti-aliasing without frame generation may play better.",
-                    Math.round(100.0 * timingLate / total), backendName());
-        }
-        timingOn = timingLate = 0;
-        timingWindowStart = now;
-    }
-
     private void adaptCap() {
         // Changing the cap resets vanilla's limiter and the pacing estimate (one hitch each time),
         // so it changes rarely: down after two bad seconds in a row, up after ten roomy ones.
@@ -627,7 +635,6 @@ public final class FrameGenerator {
             long errNs = System.nanoTime() - due;
             if (errNs > -2_000_000L && errNs < 3_000_000L) fitCount++;
             else missCount++;
-            noteGeneratedTiming(errNs > -2_000_000L && errNs < 3_000_000L);
             if (!loopStart) {
                 try {
                     surface.acquireNextTexture();
