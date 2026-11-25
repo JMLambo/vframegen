@@ -262,16 +262,16 @@ frames.
 
 ## Known issues
 
-- **OpenGL on a GPU with no time to spare: uneven frame timing.** On OpenGL, generated frames can
-  only be shown at the right moment when the GPU has some idle time between frames (see
-  [Pacing](#pacing)). When it has none, which is typical on integrated graphics,
-  each generated frame goes out late, just before the next real frame. Motion then judders: moving
-  mobs can look torn apart, and the whole screen can flicker in brightness. This only happens on
-  OpenGL. The generated frames themselves are fine
-  (checked frame by frame on a Radeon 660M); only their timing is off. On Vulkan, generated frames
+- **OpenGL (or the present thread off) on a GPU with no time to spare: uneven frame timing.**
+  Without the Vulkan present thread, generated frames can only be shown at the right moment when the
+  GPU has some idle time between frames (see [Pacing](#pacing)). When it has none, which is typical
+  on integrated graphics, each generated frame goes out late, just before the next real frame.
+  Motion then judders: moving mobs can look torn apart, and the whole screen can flicker in
+  brightness. The generated frames themselves are fine (checked frame by frame on a Radeon 660M);
+  only their timing is off. On Vulkan with the present thread on (the default), generated frames
   are shown from their own thread at the right moment, and the same setup is smooth. VFrameGen
-  notes it in the game log when it happens. Use Vulkan, or on integrated graphics use upscaling and
-  anti-aliasing without frame generation.
+  notes it in the game log when it happens. Use Vulkan with the present thread on, or on integrated
+  graphics use upscaling and anti-aliasing without frame generation.
 
 - **OpenGL without Sodium: no optical flow, and render-scale frame generation draws at full
   resolution.** The game's own OpenGL renderer lets a draw read only 12 textures (Sodium raises

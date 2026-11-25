@@ -114,7 +114,7 @@ vec3 projectDirection(vec2 uvDst, mat4 srcViewProjRot) {
 // its root motion, and with entityRotation (experimental) its body turning about its position (w
 // of the motion, radians; 0 otherwise). Not the limbs or head, so it is the same for any model or
 // animation mod.
-vec3 entityMotion(vec3 p, bool fromB) {
+vec3 entityMotion(vec3 p, bool fromB, float k) {
     int n = int(fromB ? EntCount.y : EntCount.x);
     for (int i = 0; i < n; i++) {
         vec3 lo = fromB ? EntB[i * 5].xyz : EntA[i * 5].xyz;
@@ -123,9 +123,11 @@ vec3 entityMotion(vec3 p, bool fromB) {
             vec4 m = fromB ? EntB[i * 5 + 2] : EntA[i * 5 + 2];
             vec3 pivot = fromB ? EntB[i * 5 + 4].xyz : EntA[i * 5 + 4].xyz;
             vec2 r = p.xz - pivot.xz;
-            float c = cos(m.w), s = sin(m.w);
+            // k scales the step (1: to the output frame; 1 / frac: the whole step to the other
+            // frame), the angle as well as the translation (a turn is not linear in its angle).
+            float c = cos(m.w * k), s = sin(m.w * k);
             vec2 turned = vec2(r.x * c - r.y * s, r.x * s + r.y * c);
-            return m.xyz + vec3(turned.x - r.x, 0.0, turned.y - r.y);
+            return m.xyz * k + vec3(turned.x - r.x, 0.0, turned.y - r.y);
         }
     }
     return vec3(0.0);
@@ -182,7 +184,7 @@ vec2 flowResidual(sampler2D depthTex, vec2 uvSrc, vec3 pos, bool byEntity, bool 
     if (dot(errPx, errPx) > FlowParams.y) return vec2(0.0);
     // Entity root motion to the output frame covers a fraction of the step; over the whole step:
     float frac = fromB ? 1.0 - Mix.x : Mix.x;
-    vec3 moved = byEntity ? pos + entityMotion(pos, fromB) / max(frac, 1.0e-3) : pos;
+    vec3 moved = byEntity ? pos + entityMotion(pos, fromB, 1.0 / max(frac, 1.0e-3)) : pos;
     vec4 clip = (fromB ? BToA : AToB) * vec4(moved, 1.0);
     if (clip.w <= 1.0e-6) return vec2(0.0);
     vec2 predicted = (clip.xy / clip.w) * 0.5 + 0.5;
@@ -209,7 +211,7 @@ vec3 landingSpot(sampler2D depthTex, vec2 uvSrc, float depth, mat4 invViewProj, 
 #ifdef INTERPOLATE
     vec2 residual = flowResidual(depthTex, uvSrc, pos, byEntity, fromB);
 #endif
-    if (byEntity) pos += entityMotion(pos, fromB);
+    if (byEntity) pos += entityMotion(pos, fromB, 1.0);
     vec4 clip = dstViewProj * vec4(pos, 1.0);
     if (clip.w <= 1.0e-6) return vec3(-1.0, -1.0, 0.0);
     vec2 landed = (clip.xy / clip.w) * 0.5 + 0.5;
@@ -267,10 +269,12 @@ vec3 sceneColor(sampler2D world, sampler2D noHand, sampler2D mask, vec2 uv, vec4
     bool behindHand = false;
     if (flags.x > 0.5) {
         // Within a pixel of the hand too (the whole 3x3 around uv): a filtered World read there
-        // would pick up its edge.
+        // would pick up its edge. Two pixels with the Catmull-Rom read below (Out.z), which
+        // reaches that far.
         vec2 px = Params2.zw;
-        for (int y = -1; y <= 1 && !behindHand; y++) {
-            for (int x = -1; x <= 1; x++) {
+        int reach = Out.z > 0.5 ? 2 : 1;
+        for (int y = -reach; y <= reach && !behindHand; y++) {
+            for (int x = -reach; x <= reach; x++) {
                 if (texture(mask, uv + vec2(x, y) * px).r > 0.5) {
                     behindHand = true;
                     break;
@@ -388,7 +392,7 @@ Warp warp(vec2 uvDst, sampler2D world, sampler2D depthTex, sampler2D mask, sampl
                 w.flowed = abs(p.w) > 1.0e-12 && flowResidual(depthTex, clamp(uvSrc, 0.0, 1.0), p.xyz / p.w,
                         drawnByEntity(clamp(uvSrc, 0.0, 1.0), d, fromB), fromB) != vec2(0.0);
 #endif
-                w.entity = abs(p.w) > 1.0e-12 && drawnByEntity(clamp(uvSrc, 0.0, 1.0), d, fromB) && any(notEqual(entityMotion(p.xyz / p.w, fromB), vec3(0.0)));
+                w.entity = abs(p.w) > 1.0e-12 && drawnByEntity(clamp(uvSrc, 0.0, 1.0), d, fromB) && any(notEqual(entityMotion(p.xyz / p.w, fromB, 1.0), vec3(0.0)));
             }
         }
         w.near = haveHit ? bestHitNear : bestMissNear;

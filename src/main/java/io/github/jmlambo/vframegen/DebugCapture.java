@@ -106,14 +106,26 @@ public final class DebugCapture {
                 burstNames[i] = null;
             }
             if (--burstLeft == 0) {
-                for (int k = 0; k < burstIndex; k++) {
-                    if (burstNames[k] != null) save(burstDir, burstTex[k], burstNames[k]);
+                // Each copy is freed once it is written (a burst at 4K in RGBA16F holds about 1.5 GB).
+                for (int k = 0; k < BURST; k++) {
+                    if (burstTex[k] == null) continue;
+                    if (k < burstIndex && burstNames[k] != null) save(burstDir, burstTex[k], burstNames[k], true);
+                    else burstTex[k].close();
+                    burstTex[k] = null;
                 }
-                try {
-                    Files.writeString(burstDir.resolve("frames.txt"), burstLog.toString());
-                } catch (Exception ignored) {
-                }
-                VFrameGen.LOGGER.info("Saved a burst of {} frames to {}", burstIndex, burstDir);
+                // Off the render thread: this runs right before a frame is presented.
+                Path file = burstDir.resolve("frames.txt");
+                String text = burstLog.toString();
+                int count = burstIndex;
+                Path where = burstDir;
+                Util.nonCriticalIoPool().execute(() -> {
+                    try {
+                        Files.writeString(file, text);
+                    } catch (Exception e) {
+                        VFrameGen.LOGGER.warn("Could not write {}", file, e);
+                    }
+                    VFrameGen.LOGGER.info("Saved a burst of {} frames to {}", count, where);
+                });
             }
         }
         if (!sequenceRequested) return;
@@ -168,7 +180,15 @@ public final class DebugCapture {
     }
 
     private static void save(Path dir, GpuTexture texture, String name) {
-        if (dir == null) return;
+        save(dir, texture, name, false);
+    }
+
+    /** closeTexture: the texture is a copy made for this save; closed once it has been read back. */
+    private static void save(Path dir, GpuTexture texture, String name, boolean closeTexture) {
+        if (dir == null) {
+            if (closeTexture) texture.close();
+            return;
+        }
         GpuFormat format = texture.getFormat();
         // 8-bit, or half float (some setups render the main target in RGBA16F): clamped to 0..1.
         boolean half = format == GpuFormat.RGBA16_FLOAT;
@@ -178,6 +198,7 @@ public final class DebugCapture {
         boolean flowFloat = format == GpuFormat.RG16_FLOAT;
         if (format != GpuFormat.RGBA8_UNORM && !half && !flow && !flowFloat) {
             VFrameGen.LOGGER.warn("Cannot save {}: format {} is not RGBA8 or RGBA16F", name, format);
+            if (closeTexture) texture.close();
             return;
         }
         int w = texture.getWidth(0);
@@ -218,6 +239,7 @@ public final class DebugCapture {
                 VFrameGen.LOGGER.warn("Could not save {}", file, e);
             } finally {
                 buffer.close();
+                if (closeTexture) texture.close();
             }
         }, 0);
     }
