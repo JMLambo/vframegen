@@ -205,43 +205,53 @@ public final class DebugCapture {
         int h = texture.getHeight(0);
         int bpp = half ? 8 : 4;
         Path file = dir.resolve(name + ".png");
-        GpuBuffer buffer = RenderSystem.getDevice().createBuffer(() -> "VFrameGen capture " + name,
-                GpuBuffer.USAGE_MAP_READ | GpuBuffer.USAGE_COPY_DST, (long) w * h * bpp);
-        RenderSystem.getDevice().createCommandEncoder().copyTextureToBuffer(texture, buffer, 0, () -> {
-            try (GpuBufferSlice.MappedView view = buffer.map(true, false);
-                 NativeImage image = new NativeImage(w, h, false)) {
-                ByteBuffer data = view.data().order(ByteOrder.LITTLE_ENDIAN);
-                for (int y = 0; y < h; y++) {
-                    for (int x = 0; x < w; x++) {
-                        int abgr;
-                        if (flowFloat) {
-                            int o = (y * w + x) * 4;
-                            int r = Math.clamp(128 + Math.round(Float.float16ToFloat(data.getShort(o)) * 4f), 0, 255);
-                            int g = Math.clamp(128 + Math.round(Float.float16ToFloat(data.getShort(o + 2)) * 4f), 0, 255);
-                            abgr = 0xFF000000 | (128 << 16) | (g << 8) | r;
-                        } else if (flow) {
-                            int o = (y * w + x) * 4;
-                            int r = Math.clamp(128 + data.getShort(o) / 8, 0, 255), g = Math.clamp(128 + data.getShort(o + 2) / 8, 0, 255);
-                            abgr = 0xFF000000 | (128 << 16) | (g << 8) | r;
-                        } else if (half) {
-                            int o = (y * w + x) * 8;
-                            int r = unit(data.getShort(o)), g = unit(data.getShort(o + 2)), b = unit(data.getShort(o + 4));
-                            abgr = 0xFF000000 | (b << 16) | (g << 8) | r;
-                        } else {
-                            // RGBA bytes read little-endian are ABGR; force opaque.
-                            abgr = data.getInt((y * w + x) * 4) | 0xFF000000;
+        GpuBuffer created = null;
+        try {
+            created = RenderSystem.getDevice().createBuffer(() -> "VFrameGen capture " + name,
+                    GpuBuffer.USAGE_MAP_READ | GpuBuffer.USAGE_COPY_DST, (long) w * h * bpp);
+            GpuBuffer buffer = created;
+            RenderSystem.getDevice().createCommandEncoder().copyTextureToBuffer(texture, buffer, 0, () -> {
+                try (GpuBufferSlice.MappedView view = buffer.map(true, false);
+                     NativeImage image = new NativeImage(w, h, false)) {
+                    ByteBuffer data = view.data().order(ByteOrder.LITTLE_ENDIAN);
+                    for (int y = 0; y < h; y++) {
+                        for (int x = 0; x < w; x++) {
+                            int abgr;
+                            if (flowFloat) {
+                                int o = (y * w + x) * 4;
+                                int r = Math.clamp(128 + Math.round(Float.float16ToFloat(data.getShort(o)) * 4f), 0, 255);
+                                int g = Math.clamp(128 + Math.round(Float.float16ToFloat(data.getShort(o + 2)) * 4f), 0, 255);
+                                abgr = 0xFF000000 | (128 << 16) | (g << 8) | r;
+                            } else if (flow) {
+                                int o = (y * w + x) * 4;
+                                int r = Math.clamp(128 + data.getShort(o) / 8, 0, 255), g = Math.clamp(128 + data.getShort(o + 2) / 8, 0, 255);
+                                abgr = 0xFF000000 | (128 << 16) | (g << 8) | r;
+                            } else if (half) {
+                                int o = (y * w + x) * 8;
+                                int r = unit(data.getShort(o)), g = unit(data.getShort(o + 2)), b = unit(data.getShort(o + 4));
+                                abgr = 0xFF000000 | (b << 16) | (g << 8) | r;
+                            } else {
+                                // RGBA bytes read little-endian are ABGR; force opaque.
+                                abgr = data.getInt((y * w + x) * 4) | 0xFF000000;
+                            }
+                            image.setPixelABGR(x, y, abgr);
                         }
-                        image.setPixelABGR(x, y, abgr);
                     }
+                    image.writeToFile(file);
+                } catch (Exception e) {
+                    VFrameGen.LOGGER.warn("Could not save {}", file, e);
+                } finally {
+                    buffer.close();
+                    if (closeTexture) texture.close();
                 }
-                image.writeToFile(file);
-            } catch (Exception e) {
-                VFrameGen.LOGGER.warn("Could not save {}", file, e);
-            } finally {
-                buffer.close();
-                if (closeTexture) texture.close();
-            }
-        }, 0);
+            }, 0);
+        } catch (RuntimeException e) {
+            // The copy was never scheduled, so the callback will not run: free both here and skip
+            // only this image (a burst goes on with its other frames).
+            VFrameGen.LOGGER.warn("Could not read back {}", file, e);
+            if (created != null) created.close();
+            if (closeTexture) texture.close();
+        }
     }
 
     /** A half float, clamped to 0..1, as a byte. */
