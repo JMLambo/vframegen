@@ -205,10 +205,10 @@ window size. The image is then upscaled, and the GUI stays at full resolution. T
   estimates each edge's direction and filters along it, so edges stay sharp without jaggies, then
   sharpens without halos. A little more GPU time.
 - **Temporal (TAAU)**: the world renders with a sub-pixel offset that changes every frame, and a
-  full-resolution history gathers the samples (reprojected with depth and the motion of nearby
-  mobs; anything that changed is rejected so it doesn't ghost). Cleaner edges than the others,
-  and it anti-aliases on its own, also at 100% render scale, where it is plain TAA. Shaders off
-  only for now: with a shader pack it uses edge-adaptive.
+  full-resolution history gathers the samples (reprojected with depth; anything that changed is
+  rejected so it doesn't ghost). Cleaner edges than the others, and it anti-aliases on its own,
+  also at 100% render scale, where it is plain TAA. Shaders off only for now: with a shader pack it
+  uses edge-adaptive.
 
 **Dynamic render scale** lowers the render scale (down to 50%) when real frames are too slow for
 the target frame rate, and raises it again when there is room. It aims for half the target in real
@@ -275,8 +275,8 @@ frames.
   optical flow is on; the shader version (GPUs without optical flow hardware) is less precise.
 - Entity motion only works in interpolated mode (low-latency mode has no next frame to take it
   from).
-- The temporal upscaler is for shaders off (it uses edge-adaptive with a shader pack). It follows
-  the 16 nearest moving mobs; limbs and other mobs can still blur slightly while moving.
+- The temporal upscaler is for shaders off (it uses edge-adaptive with a shader pack), and fast
+  mobs can leave a faint trail with it.
 - Transparent HUD parts show the world behind them as of the nearer real frame.
 - Intel and desktop AMD GPUs have not been tested yet, and Windows only on one older PC.
 
