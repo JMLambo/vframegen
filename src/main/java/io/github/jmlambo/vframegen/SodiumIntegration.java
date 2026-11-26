@@ -106,7 +106,7 @@ public final class SodiumIntegration implements ConfigEntryPoint {
                         .setImpact(OptionImpact.LOW)
                         .setDefaultValue(def.antiAliasing).setStorageHandler(storage)
                         // Temporal upscaling anti-aliases on its own.
-                        .setEnabledProvider(s -> Compat.irisShadersActive()
+                        .setEnabledProvider(s -> Compat.shaderPackActive()
                                 || s.readEnumOption(id("upscaler"), FrameGenConfig.Upscaler.class) != FrameGenConfig.Upscaler.TEMPORAL,
                                 id("upscaler"))
                         .setBinding(v -> cfg.antiAliasing = v, () -> cfg.antiAliasing))
@@ -117,7 +117,7 @@ public final class SodiumIntegration implements ConfigEntryPoint {
                         .setDefaultValue(def.antiAliasingQuality).setStorageHandler(storage)
                         .setEnabledProvider(s -> s.readEnumOption(id("antiAliasing"), FrameGenConfig.AntiAliasingMode.class)
                                 != FrameGenConfig.AntiAliasingMode.OFF
-                                && (Compat.irisShadersActive()
+                                && (Compat.shaderPackActive()
                                 || s.readEnumOption(id("upscaler"), FrameGenConfig.Upscaler.class) != FrameGenConfig.Upscaler.TEMPORAL),
                                 id("antiAliasing"), id("upscaler"))
                         .setBinding(v -> cfg.antiAliasingQuality = v, () -> cfg.antiAliasingQuality))

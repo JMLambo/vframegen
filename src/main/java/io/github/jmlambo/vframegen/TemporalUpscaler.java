@@ -130,7 +130,7 @@ public final class TemporalUpscaler {
     /** Whether temporal upscaling is selected and possible now. */
     public static boolean wanted() {
         return !broken && VFrameGen.config().upscaler == FrameGenConfig.Upscaler.TEMPORAL
-                && !Compat.irisShadersActive()
+                && !Compat.shaderPackActive()
                 && RenderSystemAccessor.vframegen$getCurrentPipelineCache() != null;
     }
 

@@ -3,7 +3,7 @@
   "id": "vframegen",
   "version": "${version}",
   "name": "VFrameGen",
-  "description": "Frame generation for Minecraft's Vulkan (and OpenGL) renderer: shows generated frames between real ones, built by depth-aware interpolation. Works with Sodium, Iris shader packs and Distant Horizons. Includes render scale upscaling.",
+  "description": "Frame generation for Minecraft's Vulkan (and OpenGL) renderer: shows generated frames between real ones, built by depth-aware interpolation. Works with Sodium, Iris and Vitrail shader packs, and Distant Horizons. Includes render scale upscaling.",
   "authors": [
     "JMLambo"
   ],

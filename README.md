@@ -11,7 +11,8 @@
 </p>
 
 Frame generation for Minecraft **26.3** (Fabric) that works on the **Vulkan** renderer, as well as
-OpenGL, including with **Iris shader packs**, **Sodium** and **Distant Horizons**. It also has
+OpenGL, including with **Iris shader packs**, **Vitrail shader packs**, **Sodium** and **Distant
+Horizons**. It also has
 **render scale** upscaling (spatial or temporal), **dynamic render scale** and **anti-aliasing**,
 so a weaker PC can play smoothly at a decent resolution.
 
@@ -61,8 +62,8 @@ Requires Java 25, which Minecraft 26.3 already uses.
 | Minecraft | 26.3, Fabric Loader 0.19.5+ |
 | Backend | Vulkan (present thread) and OpenGL, both with and without shader packs |
 | GPU / OS | NVIDIA RTX 4050 Laptop and AMD Radeon 660M (integrated, RADV), Linux (Fedora, KDE Wayland); NVIDIA GTX 1060 3 GB with an i7-7700 and 8 GB RAM, Windows (vanilla renderer, Vulkan) |
-| Mods | Sodium 0.9.3, Iris 1.12 (a local build with Distant Horizons 3.4 and Sodium 0.9.3 support), Distant Horizons 3.4, Entity Model Features / Entity Texture Features with Fresh Animations, Controlify 3.5.3, Reflex 1.1.6. Also tested without Sodium, Iris and Distant Horizons (vanilla renderer) on both backends. |
-| Shader packs | Complementary Unbound r5.10 + Euphoria Patches 1.11.2 (RTX 4050), Mellow 3.5 (Radeon 660M: about 30 real fps on its Fancy preset) |
+| Mods | Sodium 0.9.3, Iris 1.12 (a local build with Distant Horizons 3.4 and Sodium 0.9.3 support), Vitrail 0.13.0-beta (with Sodium 0.9.2), Distant Horizons 3.4, Entity Model Features / Entity Texture Features with Fresh Animations, Controlify 3.5.3, Reflex 1.1.6. Also tested without Sodium, Iris and Distant Horizons (vanilla renderer) on both backends. |
+| Shader packs | Complementary Unbound r5.10 + Euphoria Patches 1.11.2 (RTX 4050), Complementary Reimagined r5.10 with Vitrail on Vulkan (RTX 4050), Mellow 3.5 (Radeon 660M: about 30 real fps on its Fancy preset) |
 
 On integrated graphics a generated frame at 1080p costs about as much as a real one (on the 660M:
 about 4 ms for VFrameGen's passes plus the copies and presenting), so use only upscaling and
@@ -171,6 +172,11 @@ Frame generation makes motion smoother; it does not make the game itself run fas
   masked by depth, because packs draw it themselves. Official Iris releases only support OpenGL: on
   Vulkan, shader packs need an Iris build with Vulkan support. With shaders off, the official Iris
   runs fine on both.
+- **Vitrail**: works with shader packs on Vulkan (tested with 0.13.0-beta, Sodium 0.9.2 and
+  Complementary Reimagined r5.10 on an RTX 4050). The held item is masked by depth and blocks behind
+  water and moving mobs reproject correctly. Vitrail 0.13.0-beta needs Sodium 0.9.2; it does not
+  apply against 0.9.3. Do not run Iris and Vitrail together in this instance: Sodium refuses to
+  start with both registering the same option.
 - **Distant Horizons**: works. LOD terrain reprojects with its depth (tested with 3.3.4, the
   official release, and 3.4.0 RC2). A few things to know:
   - On **Vulkan**, Distant Horizons works with or without Sodium, but not together with the
