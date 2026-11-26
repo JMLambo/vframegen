@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.0-beta.9
+
 - Frame generation works with **Vitrail** shader packs on Vulkan (tested with Vitrail 0.13.0-beta,
   Sodium 0.9.2 and Complementary Reimagined r5.10 on an RTX 4050). Joining a world no longer crashes
   with "Close the existing render pass before creating a new one", mobs no longer disappear and the
