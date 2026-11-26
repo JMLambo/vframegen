@@ -46,8 +46,8 @@ public final class PackBlurCheck {
         Path game = mc.gameDirectory.toPath();
         boolean vitrail = Compat.vitrailShadersActive();
         Properties choice = read(game.resolve(vitrail ? "vitrail/pack.txt" : "config/iris.properties"));
-        String pack = choice.getProperty(vitrail ? "pack" : "shaderPack", "");
-        if (pack.isEmpty()) return;
+        String pack = packFileName(choice.getProperty(vitrail ? "pack" : "shaderPack", ""));
+        if (pack == null) return;
         if (vitrail && ("none".equalsIgnoreCase(pack)
                 || !Boolean.parseBoolean(choice.getProperty("enabled", "true")))) return;
         Path settings = game.resolve("shaderpacks").resolve(pack + ".txt");
@@ -73,6 +73,16 @@ public final class PackBlurCheck {
         SystemToast.addOrUpdate(mc.gui.toastManager(), TOAST,
                 Component.translatable("vframegen.packBlur.title"),
                 Component.translatable("vframegen.packBlur.message"));
+    }
+
+    /**
+     * A pack selector names a file in shaderpacks, nothing else. Both loaders write it, so keep a
+     * malformed one from resolving a settings file outside that folder.
+     */
+    private static String packFileName(String selector) {
+        if (selector.isEmpty() || selector.equals(".") || selector.equals("..")
+                || selector.indexOf('/') >= 0 || selector.indexOf('\\') >= 0) return null;
+        return selector;
     }
 
     /** The option that turns the pack's motion blur on, or null. */
