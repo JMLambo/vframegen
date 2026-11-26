@@ -34,6 +34,47 @@ public final class Compat {
         }
     }
 
+    /**
+     * True when a shader pack is drawing the world, whichever loader draws it (Iris on OpenGL,
+     * Vitrail on Vulkan). Code that must step aside for a pack's own targets and passes asks this;
+     * code that reads Iris' own textures keeps asking {@link #irisShadersActive()}.
+     */
+    public static boolean shaderPackActive() {
+        return irisShadersActive() || vitrailShadersActive();
+    }
+
+    private static final boolean VITRAIL = FabricLoader.getInstance().isModLoaded("vitrail");
+    private static MethodHandle vitrailDrawingPack;
+    private static boolean vitrailLookupFailed;
+
+    /**
+     * True when Vitrail is drawing the world with a shader pack.
+     *
+     * <p>Vitrail replaces the level's one render pass with its own {@code LevelPass}, which steps
+     * aside for the pack's passes and expects the game's own pass to stay where it is. VFrameGen's
+     * deferred classic transparency opens a pass of its own around the game's translucent phase
+     * (to keep the opaque depth); Vitrail then opens its pack pass inside that one and the game
+     * stops with "Close the existing render pass before creating a new one". So with a pack,
+     * classic transparency is left where it is, as with Iris.
+     */
+    public static boolean vitrailShadersActive() {
+        if (!VITRAIL) return false;
+        if (vitrailLookupFailed) return true; // cannot tell: assume it owns the pass, never crash
+        try {
+            if (vitrailDrawingPack == null) {
+                Class<?> packChain = Class.forName("dev.vitrail.render.PackChain");
+                vitrailDrawingPack = MethodHandles.publicLookup()
+                        .findStatic(packChain, "drawingPack", MethodType.methodType(boolean.class));
+            }
+            return (boolean) vitrailDrawingPack.invoke();
+        } catch (Throwable t) {
+            vitrailLookupFailed = true;
+            VFrameGen.LOGGER.warn("Vitrail is installed but its state could not be queried; "
+                    + "assuming a shader pack is drawing", t);
+            return true;
+        }
+    }
+
     private static java.lang.reflect.Method irisPipelineManager;
     private static java.lang.reflect.Method irisPipelineNullable;
     private static java.lang.reflect.Field irisRenderTargets;

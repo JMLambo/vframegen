@@ -609,9 +609,9 @@ public final class FrameGenerator {
                 capture = true;
                 captureLog.setLength(0);
                 captureLog.append(String.format(Locale.ROOT,
-                        "mode=interpolated multiplier=%d real interval %.2f ms, A on screen %.2f ms after present() A->B ms=%.2f iris=%s%n",
+                        "mode=interpolated multiplier=%d real interval %.2f ms, A on screen %.2f ms after present() A->B ms=%.2f shaders=%s%n",
                         frames, realIntervalNs / 1e6, (genStartNs - lastRealPresentNs) / 1e6,
-                        (held.extractNs - shown.extractNs) / 1e6, Compat.irisShadersActive()));
+                        (held.extractNs - shown.extractNs) / 1e6, Compat.shaderPackActive()));
                 DebugCapture.save(shown.finalImage, "0-real-A");
                 saveCapturedFlow();
             }
@@ -786,7 +786,7 @@ public final class FrameGenerator {
         GpuDevice device = RenderSystem.getDevice();
         boolean zeroToOne = device.getDeviceInfo().isZZeroToOne();
         boolean reversedZ = ndcDepthAt(src.proj, 1.0f) > ndcDepthAt(src.proj, 100.0f);
-        boolean handBuffer = src.hasHand && !Compat.irisShadersActive();
+        boolean handBuffer = src.hasHand && !Compat.shaderPackActive();
         boolean nearLock = !handBuffer && src.firstPerson;
         Matrix4f srcInvViewProj = new Matrix4f(src.proj).mul(src.viewRot).invert();
         Matrix4f curViewProj = new Matrix4f(proj).mul(viewRot).translate(
@@ -1427,7 +1427,7 @@ public final class FrameGenerator {
         GpuDevice device = RenderSystem.getDevice();
         CommandEncoder encoder = device.createCommandEncoder();
         boolean zeroToOne = device.getDeviceInfo().isZZeroToOne();
-        boolean irisShaders = Compat.irisShadersActive();
+        boolean shaderPack = Compat.shaderPackActive();
         boolean useDepth = switch (cfg.depthMode) {
             case DEPTH -> true;
             case ROTATION_ONLY -> false;
@@ -1451,8 +1451,8 @@ public final class FrameGenerator {
             putSource(ub, bb, dstViewProjRot, dstPos);
             ub.putVec4(cfg.guiDiffThreshold, cfg.debugTint ? 1f : 0f, cfg.sharpness, debugView ? 1f : 0f)
                     .putVec4(reversedZ ? 1f : 0f, zeroToOne ? 1f : 0f, 1f / width, 1f / height);
-            putFlags(ub, a, irisShaders, useDepth, zeroToOne);
-            putFlags(ub, bb, irisShaders, useDepth, zeroToOne);
+            putFlags(ub, a, shaderPack, useDepth, zeroToOne);
+            putFlags(ub, bb, shaderPack, useDepth, zeroToOne);
             ub.putVec4(t, 0f, 0f, 0f);
             // Moving entities: only between two real frames (interpolated), where both positions are known.
             int countA = b != null ? putEntities(null, a, b, t, dstViewProjRot, dstPos) : 0;
@@ -1747,9 +1747,9 @@ public final class FrameGenerator {
     /** Mark the held item's pixels in slot c, once, for every generated frame that uses it. */
     private void buildMask(FrameSlot c) {
         GpuDevice device = RenderSystem.getDevice();
-        boolean irisShaders = Compat.irisShadersActive();
+        boolean shaderPack = Compat.shaderPackActive();
         boolean zeroToOne = device.getDeviceInfo().isZZeroToOne();
-        boolean handBuffer = c.hasHand && !irisShaders;
+        boolean handBuffer = c.hasHand && !shaderPack;
         boolean nearLock = !handBuffer && c.firstPerson;
         boolean reversedZ = ndcDepthAt(c.proj, 1.0f) > ndcDepthAt(c.proj, 100.0f);
         CommandEncoder encoder = device.createCommandEncoder();
@@ -1794,7 +1794,7 @@ public final class FrameGenerator {
      */
     private void buildFixedMask(FrameSlot c) {
         GpuDevice device = RenderSystem.getDevice();
-        boolean handBuffer = c.hasHand && !Compat.irisShadersActive();
+        boolean handBuffer = c.hasHand && !Compat.shaderPackActive();
         boolean nearLock = !handBuffer && c.firstPerson;
         CommandEncoder encoder = device.createCommandEncoder();
         if (fixedMaskUbo == null) {
@@ -1840,9 +1840,9 @@ public final class FrameGenerator {
         ub.putMat4f(invViewProj).putMat4f(dstViewProj).putMat4f(viewProjRot);
     }
 
-    private void putFlags(Std140Builder ub, FrameSlot s, boolean irisShaders, boolean useDepth, boolean zeroToOne) {
-        // Iris draws the held item itself, so vanilla's hand buffers mean nothing with a pack on.
-        boolean handBuffer = s.hasHand && !irisShaders;
+    private void putFlags(Std140Builder ub, FrameSlot s, boolean shaderPack, boolean useDepth, boolean zeroToOne) {
+        // A shader pack draws the held item itself, so vanilla's hand buffers mean nothing with one on.
+        boolean handBuffer = s.hasHand && !shaderPack;
         // Needs the depth buffer, not depth reprojection: also on in rotation-only mode.
         boolean nearLock = !handBuffer && s.firstPerson;
         ub.putVec4(handBuffer ? 1f : 0f, nearLock ? 1f : 0f, depthAt(s.proj, LOCKED_DISTANCE, zeroToOne), useDepth ? 1f : 0f);
@@ -1934,16 +1934,22 @@ public final class FrameGenerator {
     }
 
     /**
-     * Whether the level renderer should draw entities in a pass of their own, so the depth before
-     * them can be kept (captureTerrainDepth). Also with a shader pack (Iris draws into the main
-     * depth buffer too; IrisPipelineMixin draws them while its opaque targets are still in use).
-     * Only interpolation moves entities.
+     * Whether the depth before entities is needed (captureTerrainDepth). Only interpolation moves
+     * entities. With Iris, entities are drawn in a pass of their own so the depth can be kept in
+     * between (IrisPipelineMixin draws them while its opaque targets are still in use). With
+     * Vitrail, entities stay in the level's own pass — moving them makes them disappear — and the
+     * depth is instead copied in place, just before that pass (LevelRendererMixin).
      */
     public boolean wantsTerrainDepth() {
         return active() && interpolated();
     }
 
-    /** Whether the level renderer should keep the depth from before translucents (see captureOpaqueDepth). */
+    /**
+     * Whether the level renderer should keep the depth from before translucents (see
+     * captureOpaqueDepth). Not with Iris: it keeps that depth itself (irisDepthNoTranslucents).
+     * With Vitrail it is wanted, but taken in place rather than by deferring the translucents into
+     * a pass of VFrameGen's (see LevelRendererMixin and Compat.vitrailShadersActive).
+     */
     public boolean wantsOpaqueDepth() {
         return active() && !Compat.irisShadersActive();
     }
@@ -2311,8 +2317,8 @@ public final class FrameGenerator {
             if (!capture && DebugCapture.begin()) {
                 capture = true;
                 captureLog.setLength(0);
-                captureLog.append(String.format(Locale.ROOT, "mode=interpolated (present thread) multiplier=%d A->B ms=%.2f iris=%s%n",
-                        frames, (held.extractNs - shown.extractNs) / 1e6, Compat.irisShadersActive()));
+                captureLog.append(String.format(Locale.ROOT, "mode=interpolated (present thread) multiplier=%d A->B ms=%.2f shaders=%s%n",
+                        frames, (held.extractNs - shown.extractNs) / 1e6, Compat.shaderPackActive()));
                 DebugCapture.save(shown.finalImage, "0-real-A");
                 saveCapturedFlow();
             }

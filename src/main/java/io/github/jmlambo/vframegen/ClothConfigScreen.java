@@ -101,7 +101,7 @@ final class ClothConfigScreen {
                 .setSaveConsumer(v -> cfg.upscaler = v).build();
         upscaling.addEntry(upscaler);
         // Temporal upscaling anti-aliases on its own, except with a shader pack (spatial fallback).
-        Requirement temporalAa = Compat.irisShadersActive() ? () -> true
+        Requirement temporalAa = Compat.shaderPackActive() ? () -> true
                 : Requirement.not(Requirement.isValue(upscaler, FrameGenConfig.Upscaler.TEMPORAL));
         upscaling.addEntry(e.startEnumSelector(t("generatedUpscaler"), FrameGenConfig.GeneratedUpscaler.class, cfg.generatedUpscaler)
                 .setDefaultValue(def.generatedUpscaler).setTooltip(tip("generatedUpscaler"))

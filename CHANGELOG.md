@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Frame generation works with **Vitrail** shader packs on Vulkan (tested with Vitrail 0.13.0-beta,
+  Sodium 0.9.2 and Complementary Reimagined r5.10 on an RTX 4050). Joining a world no longer crashes
+  with "Close the existing render pass before creating a new one", mobs no longer disappear and the
+  held item no longer leaves artifacts. Blocks seen through water stay put between generated frames,
+  and moving mobs no longer drag the blocks behind them. A pack's own motion blur gets the same
+  warning as with Iris.
+
 ## 1.0.0-beta.8
 
 - Sharper generated frames with the Temporal upscaler: they read its image with a sharp filter

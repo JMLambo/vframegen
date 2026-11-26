@@ -1,5 +1,6 @@
 package io.github.jmlambo.vframegen.mixin;
 
+import io.github.jmlambo.vframegen.Compat;
 import io.github.jmlambo.vframegen.DeferredSolidAccess;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
@@ -95,6 +96,14 @@ public abstract class LevelRendererMixin implements DeferredSolidAccess {
             original.call(features, pass);
             return;
         }
+        if (Compat.vitrailShadersActive()) {
+            // Vitrail serves entities through the level's own pass; a pass of ours makes them
+            // disappear. Its command encoder closes the level pass for a copy and opens it again
+            // on the next draw, so the terrain depth can be taken here without moving anything.
+            FrameGenerator.INSTANCE.captureTerrainDepth(Minecraft.getInstance().gameRenderer);
+            original.call(features, pass);
+            return;
+        }
         vframegen$deferredSolid = features;
         vframegen$deferredSolidCall = original;
     }
@@ -129,6 +138,15 @@ public abstract class LevelRendererMixin implements DeferredSolidAccess {
     private void vframegen$deferClassicTransparency(LevelRenderer self, ChunkSectionsToRender sections,
             FeatureRenderDispatcher.PreparedFrame features, RenderPass pass, Operation<Void> original) {
         if (!FrameGenerator.INSTANCE.wantsOpaqueDepth()) {
+            original.call(self, sections, features, pass);
+            return;
+        }
+        if (Compat.vitrailShadersActive()) {
+            // Vitrail can close its level pass for a copy (its command encoder does that for every
+            // copy and clear), so the depth can be taken right here and the translucents stay in
+            // the game's own pass. Deferring them into a pass of ours would make Vitrail open its
+            // pack pass inside that one and crash.
+            FrameGenerator.INSTANCE.captureOpaqueDepth(Minecraft.getInstance().gameRenderer);
             original.call(self, sections, features, pass);
             return;
         }

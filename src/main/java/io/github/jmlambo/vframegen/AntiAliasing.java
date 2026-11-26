@@ -84,7 +84,7 @@ public final class AntiAliasing {
     public static void applyGenerated(GpuTexture color, GpuTextureView colorView) {
         FrameGenConfig.AntiAliasingMode mode = VFrameGen.config().antiAliasing;
         if (broken || mode == FrameGenConfig.AntiAliasingMode.OFF) return;
-        if (VFrameGen.config().upscaler == FrameGenConfig.Upscaler.TEMPORAL && !Compat.irisShadersActive()) return;
+        if (VFrameGen.config().upscaler == FrameGenConfig.Upscaler.TEMPORAL && !Compat.shaderPackActive()) return;
         if (RenderSystemAccessor.vframegen$getCurrentPipelineCache() == null) return;
         // Its own working textures (at the render scale), so the real frames' (window-sized) ones are
         // not reallocated twice per frame.
