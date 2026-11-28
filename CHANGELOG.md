@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **OneClient**'s pause menu blur covers the whole screen with render scale or dynamic render scale
+  on (it only covered the top left part).
+
 - Frame generation works with **Aetherium** shader packs on Vulkan (tested with Aetherium 0.1.3,
   Sodium 0.9.2 and Complementary Reimagined r5.10 on an RTX 4050). Mobs no longer look see-through
   or shake, blocks no longer get a blue outline, the held item stays in place, and the world no
