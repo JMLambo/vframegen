@@ -15,6 +15,7 @@
     "LevelRendererMixin",
     "MinecraftAccessor",
     "MinecraftMixin",
+    "PolyUiBlurMixin",
     "RenderSystemAccessor",
     "RenderTargetAccessor",
     "ScreenshotMixin",
