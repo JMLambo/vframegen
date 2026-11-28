@@ -2022,8 +2022,8 @@ public final class FrameGenerator {
         if (Compat.aetheriumShadersActive()) {
             // The finished image. The depth from before translucents is already there, and the
             // held item's mask reads its own copy (captureHandDepth).
-            if (!(frameOpaqueDepthCaptured || copy(main.getDepthTexture(), c.depth))
-                    || !copy(main.getColorTexture(), c.noHand)) {
+            if (!(frameOpaqueDepthCaptured || copy(RenderScale.worldDepth(main), c.depth))
+                    || !copy(RenderScale.worldColor(main), c.noHand)) {
                 c.valid = false;
                 return;
             }

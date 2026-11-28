@@ -80,6 +80,7 @@ public final class Compat {
     private static MethodHandle aetheriumWorldActive;
     private static boolean aetheriumLookupFailed;
     private static boolean aetheriumDrewFrame;
+    private static MethodHandle aetheriumPackActive;
 
     /** A new frame: Aetherium has drawn nothing of it yet. */
     static void aetheriumFrameStart() {
@@ -92,6 +93,28 @@ public final class Compat {
      */
     public static void aetheriumDrawing() {
         aetheriumDrewFrame = true;
+    }
+
+    /**
+     * True when Aetherium has a shader pack on. Only for the start of the world's rendering, where
+     * Aetherium asks the same itself (the first call may load the pack).
+     */
+    static boolean aetheriumPackOn() {
+        if (!AETHERIUM) return false;
+        if (aetheriumShadersActive()) return true;
+        if (aetheriumLookupFailed) return true;
+        try {
+            if (aetheriumPackActive == null) {
+                aetheriumPackActive = MethodHandles.publicLookup().findVirtual(
+                        aetheriumEngine.type().returnType(), "packActive", MethodType.methodType(boolean.class));
+            }
+            return (boolean) aetheriumPackActive.invoke(aetheriumEngine.invoke());
+        } catch (Throwable t) {
+            aetheriumLookupFailed = true;
+            VFrameGen.LOGGER.warn("Aetherium is installed but its pack could not be queried; "
+                    + "assuming a shader pack is on", t);
+            return true;
+        }
     }
 
     /**
