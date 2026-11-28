@@ -4,6 +4,7 @@
   "package": "io.github.jmlambo.vframegen.mixin",
   "compatibilityLevel": "JAVA_25",
   "client": [
+    "AetheriumEngineMixin",
     "DebugEntryFpsMixin",
     "GameRendererAccessor",
     "GameRendererMixin",

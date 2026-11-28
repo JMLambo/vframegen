@@ -144,7 +144,9 @@ public final class TemporalUpscaler {
         ran = false;
         jittered = false;
         depthCaptured = handCaptured = curProjCaptured = false;
-        if (!wanted()) {
+        // Aetherium may not have said yet that it draws this frame (the order of both mods' hooks at
+        // the start of the world is not fixed), so ask whether it has a pack on.
+        if (!wanted() || Compat.aetheriumPackOn()) {
             hasPrev = false;
             wantedBias = 0f;
             return;

@@ -137,7 +137,7 @@ public abstract class LevelRendererMixin implements DeferredSolidAccess {
             target = "Lnet/minecraft/client/renderer/LevelRenderer;executeClassicTransparency(Lnet/minecraft/client/renderer/chunk/ChunkSectionsToRender;Lnet/minecraft/client/renderer/feature/FeatureRenderDispatcher$PreparedFrame;Lcom/mojang/renderpearl/api/commands/RenderPass;)V"))
     private void vframegen$deferClassicTransparency(LevelRenderer self, ChunkSectionsToRender sections,
             FeatureRenderDispatcher.PreparedFrame features, RenderPass pass, Operation<Void> original) {
-        if (!FrameGenerator.INSTANCE.wantsOpaqueDepth()) {
+        if (!FrameGenerator.INSTANCE.wantsOpaqueDepth() || Compat.aetheriumShadersActive()) {
             original.call(self, sections, features, pass);
             return;
         }

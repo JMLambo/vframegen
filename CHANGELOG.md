@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Frame generation works with **Aetherium** shader packs on Vulkan (tested with Aetherium 0.1.3,
+  Sodium 0.9.2 and Complementary Reimagined r5.10 on an RTX 4050). Mobs no longer look see-through
+  or shake, blocks no longer get a blue outline, the held item stays in place, and the world no
+  longer shakes with view bobbing.
+
 ## 1.0.0-beta.9
 
 - Frame generation works with **Vitrail** shader packs on Vulkan (tested with Vitrail 0.13.0-beta,

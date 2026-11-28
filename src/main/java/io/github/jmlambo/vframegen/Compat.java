@@ -36,11 +36,11 @@ public final class Compat {
 
     /**
      * True when a shader pack is drawing the world, whichever loader draws it (Iris on OpenGL,
-     * Vitrail on Vulkan). Code that must step aside for a pack's own targets and passes asks this;
+     * Vitrail or Aetherium on Vulkan). Code that must step aside for a pack's own targets and passes asks this;
      * code that reads Iris' own textures keeps asking {@link #irisShadersActive()}.
      */
     public static boolean shaderPackActive() {
-        return irisShadersActive() || vitrailShadersActive();
+        return irisShadersActive() || vitrailShadersActive() || aetheriumShadersActive();
     }
 
     private static final boolean VITRAIL = FabricLoader.getInstance().isModLoaded("vitrail");
@@ -70,6 +70,76 @@ public final class Compat {
         } catch (Throwable t) {
             vitrailLookupFailed = true;
             VFrameGen.LOGGER.warn("Vitrail is installed but its state could not be queried; "
+                    + "assuming a shader pack is drawing", t);
+            return true;
+        }
+    }
+
+    private static final boolean AETHERIUM = FabricLoader.getInstance().isModLoaded("aetherium");
+    private static MethodHandle aetheriumEngine;
+    private static MethodHandle aetheriumWorldActive;
+    private static boolean aetheriumLookupFailed;
+    private static boolean aetheriumDrewFrame;
+    private static MethodHandle aetheriumPackActive;
+
+    /** A new frame: Aetherium has drawn nothing of it yet. */
+    static void aetheriumFrameStart() {
+        aetheriumDrewFrame = false;
+    }
+
+    /**
+     * Aetherium is drawing this frame's world with a pack. It reports itself inactive again before
+     * the held item and the finished image are captured, so this is remembered for the frame.
+     */
+    public static void aetheriumDrawing() {
+        aetheriumDrewFrame = true;
+    }
+
+    /**
+     * True when Aetherium has a shader pack on. Only for the start of the world's rendering, where
+     * Aetherium asks the same itself (the first call may load the pack).
+     */
+    static boolean aetheriumPackOn() {
+        if (!AETHERIUM) return false;
+        if (aetheriumShadersActive()) return true;
+        if (aetheriumLookupFailed) return true;
+        try {
+            if (aetheriumPackActive == null) {
+                aetheriumPackActive = MethodHandles.publicLookup().findVirtual(
+                        aetheriumEngine.type().returnType(), "packActive", MethodType.methodType(boolean.class));
+            }
+            return (boolean) aetheriumPackActive.invoke(aetheriumEngine.invoke());
+        } catch (Throwable t) {
+            aetheriumLookupFailed = true;
+            VFrameGen.LOGGER.warn("Aetherium is installed but its pack could not be queried; "
+                    + "assuming a shader pack is on", t);
+            return true;
+        }
+    }
+
+    /**
+     * True when Aetherium is drawing the world with a shader pack.
+     *
+     * <p>Aetherium shades the opaque world as soon as the level's pass is closed and holds the
+     * translucents back until after that itself. Entities VFrameGen holds back for a pass of its
+     * own are therefore drawn before that shading (AetheriumEngineMixin: drawn after it, they
+     * looked see-through), and the translucents are left to Aetherium.
+     */
+    public static boolean aetheriumShadersActive() {
+        if (!AETHERIUM) return false;
+        if (aetheriumDrewFrame) return true;
+        if (aetheriumLookupFailed) return true; // cannot tell: assume it is drawing, move nothing
+        try {
+            if (aetheriumWorldActive == null) {
+                Class<?> engine = Class.forName("dev.spacebod.aetherium.shaders.engine.ShaderPackEngine");
+                MethodHandles.Lookup lookup = MethodHandles.publicLookup();
+                aetheriumEngine = lookup.findStatic(engine, "get", MethodType.methodType(engine));
+                aetheriumWorldActive = lookup.findVirtual(engine, "worldActive", MethodType.methodType(boolean.class));
+            }
+            return (boolean) aetheriumWorldActive.invoke(aetheriumEngine.invoke());
+        } catch (Throwable t) {
+            aetheriumLookupFailed = true;
+            VFrameGen.LOGGER.warn("Aetherium is installed but its state could not be queried; "
                     + "assuming a shader pack is drawing", t);
             return true;
         }

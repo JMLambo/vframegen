@@ -62,8 +62,8 @@ Requires Java 25, which Minecraft 26.3 already uses.
 | Minecraft | 26.3, Fabric Loader 0.19.5+ |
 | Backend | Vulkan (present thread) and OpenGL, both with and without shader packs |
 | GPU / OS | NVIDIA RTX 4050 Laptop and AMD Radeon 660M (integrated, RADV), Linux (Fedora, KDE Wayland); NVIDIA GTX 1060 3 GB with an i7-7700 and 8 GB RAM, Windows (vanilla renderer, Vulkan) |
-| Mods | Sodium 0.9.3, Iris 1.12 (a local build with Distant Horizons 3.4 and Sodium 0.9.3 support), Vitrail 0.13.0-beta (with Sodium 0.9.2), Distant Horizons 3.4, Entity Model Features / Entity Texture Features with Fresh Animations, Controlify 3.5.3, Reflex 1.1.6. Also tested without Sodium, Iris and Distant Horizons (vanilla renderer) on both backends. |
-| Shader packs | Complementary Unbound r5.10 + Euphoria Patches 1.11.2 (RTX 4050), Complementary Reimagined r5.10 with Vitrail on Vulkan (RTX 4050), Mellow 3.5 (Radeon 660M: about 30 real fps on its Fancy preset) |
+| Mods | Sodium 0.9.3, Iris 1.12 (a local build with Distant Horizons 3.4 and Sodium 0.9.3 support), Vitrail 0.13.0-beta (with Sodium 0.9.2), Aetherium 0.1.3 (with Sodium 0.9.2), Distant Horizons 3.4, Entity Model Features / Entity Texture Features with Fresh Animations, Controlify 3.5.3, Reflex 1.1.6. Also tested without Sodium, Iris and Distant Horizons (vanilla renderer) on both backends. |
+| Shader packs | Complementary Unbound r5.10 + Euphoria Patches 1.11.2 (RTX 4050), Complementary Reimagined r5.10 with Vitrail and with Aetherium on Vulkan (RTX 4050), Mellow 3.5 (Radeon 660M: about 30 real fps on its Fancy preset) |
 
 On integrated graphics a generated frame at 1080p costs about as much as a real one (on the 660M:
 about 4 ms for VFrameGen's passes plus the copies and presenting), so use only upscaling and
@@ -172,6 +172,8 @@ Frame generation makes motion smoother; it does not make the game itself run fas
   masked by depth, because packs draw it themselves. Official Iris releases only support OpenGL: on
   Vulkan, shader packs need an Iris build with Vulkan support. With shaders off, the official Iris
   runs fine on both.
+- **Aetherium**: works with shader packs on Vulkan (tested with 0.1.3, Sodium 0.9.2 and
+  Complementary Reimagined r5.10). It cannot be installed together with Iris or Vitrail.
 - **Vitrail**: works with shader packs on Vulkan (tested with 0.13.0-beta, Sodium 0.9.2 and
   Complementary Reimagined r5.10 on an RTX 4050). The held item is masked by depth and blocks behind
   water and moving mobs reproject correctly. Vitrail 0.13.0-beta needs Sodium 0.9.2; it does not
