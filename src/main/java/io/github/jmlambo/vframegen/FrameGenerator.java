@@ -154,6 +154,9 @@ public final class FrameGenerator {
     private boolean frameProjCaptured;
     private final Matrix4f frameProj = new Matrix4f();
     private boolean frameWorldDepthCaptured;
+    // The camera view the world was drawn with under Aetherium (see captureOpaqueDepth).
+    private final Matrix4f frameDrawnView = new Matrix4f();
+    private boolean frameDrawnViewCaptured;
     /** The depth was taken before water and other translucents were drawn (captureOpaqueDepth). */
     private boolean frameOpaqueDepthCaptured;
     /** The depth was also taken before entities were drawn (captureTerrainDepth). */
@@ -391,7 +394,9 @@ public final class FrameGenerator {
         StallProbe.loopStart();
         VsyncGuard.enforce(mc);
         PackBlurCheck.tick(mc);
+        Compat.aetheriumFrameStart();
         frameProjCaptured = false;
+        frameDrawnViewCaptured = false;
         frameWorldDepthCaptured = false;
         frameOpaqueDepthCaptured = false;
         frameTerrainDepthCaptured = false;
@@ -1756,7 +1761,7 @@ public final class FrameGenerator {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             ByteBuffer data = Std140Builder.onStack(stack, MASK_UBO_SIZE)
                     .putVec4(handBuffer ? 1f : 0f, nearLock ? 1f : 0f, depthAt(c.proj, LOCKED_DISTANCE, zeroToOne), 0f)
-                    .putVec4(reversedZ ? 1f : 0f, zeroToOne ? 1f : 0f, 1f / width, 1f / height)
+                    .putVec4(reversedZ ? 1f : 0f, c.hasHand && Compat.aetheriumShadersActive() ? 1f : 0f, 1f / width, 1f / height)
                     .get();
             encoder.writeToBuffer(maskUbo.slice(), data);
         }
@@ -1965,6 +1970,12 @@ public final class FrameGenerator {
         FrameSlot c = prepare(gr);
         if (c == null) return;
         frameOpaqueDepthCaptured = copy(gr.mainRenderTarget().getDepthTexture(), c.depth);
+        if (Compat.aetheriumShadersActive()) {
+            // Aetherium puts view bobbing and the hurt tilt into the camera's view instead of the
+            // projection, and takes them out again before the held item: read it while it is in.
+            frameDrawnView.set(gr.gameRenderState().levelRenderState.cameraRenderState.viewRotationMatrix);
+            frameDrawnViewCaptured = true;
+        }
     }
 
     /**
@@ -1981,7 +1992,8 @@ public final class FrameGenerator {
     /** Right before the held item is drawn: the depth buffer still has the whole world in it. */
     public void captureWorldDepth(GameRenderer gr) {
         FrameSlot c = prepare(gr);
-        if (c == null) return;
+        // Aetherium finishes the pack's image after the held item: both are taken in captureWorld.
+        if (c == null || Compat.aetheriumShadersActive()) return;
         RenderTarget main = gr.mainRenderTarget();
         boolean depth = frameOpaqueDepthCaptured || copy(main.getDepthTexture(), c.depth);
         frameWorldDepthCaptured = depth && copy(main.getColorTexture(), c.noHand);
@@ -1989,7 +2001,8 @@ public final class FrameGenerator {
 
     /** Right after the held item is drawn, into a depth buffer that was cleared for it. */
     public void captureHandDepth(GameRenderer gr, boolean usedHudTarget) {
-        if (!frameWorldDepthCaptured || building == null) return;
+        boolean aetherium = Compat.aetheriumShadersActive();
+        if (aetherium ? prepare(gr) == null : !frameWorldDepthCaptured || building == null) return;
         RenderTarget hud = ((GameRendererAccessor) gr).vframegen$hud3DTarget();
         RenderTarget target = usedHudTarget && hud != null ? hud : gr.mainRenderTarget();
         GpuTexture handDepth = target.getDepthTexture();
@@ -2006,7 +2019,15 @@ public final class FrameGenerator {
         FrameSlot c = prepare(gr);
         if (c == null) return;
         RenderTarget main = gr.mainRenderTarget();
-        if (!frameWorldDepthCaptured) {
+        if (Compat.aetheriumShadersActive()) {
+            // The finished image. The depth from before translucents is already there, and the
+            // held item's mask reads its own copy (captureHandDepth).
+            if (!(frameOpaqueDepthCaptured || copy(main.getDepthTexture(), c.depth))
+                    || !copy(main.getColorTexture(), c.noHand)) {
+                c.valid = false;
+                return;
+            }
+        } else if (!frameWorldDepthCaptured) {
             // render3dHud did not run (or another mod replaced it): no separate hand pass. With
             // render scale the world's own (smaller) textures are the swapped-out ones.
             if (!(frameOpaqueDepthCaptured || copy(RenderScale.worldDepth(main), c.depth))
@@ -2033,6 +2054,12 @@ public final class FrameGenerator {
             c.proj.set(frameProj);
         } else {
             currentProjection(gr, gr.gameRenderState(), cam, c.proj);
+        }
+        if (frameDrawnViewCaptured) {
+            // The same effects, folded into the projection as without Aetherium.
+            Matrix4f effects = new Matrix4f(frameDrawnView).mul(new Matrix4f(cam.viewRotationMatrix).invert());
+            c.projBob.mul(effects);
+            c.proj.mul(effects);
         }
         c.extractNs = frameExtractNs != 0 ? frameExtractNs : System.nanoTime();
         c.hasHand = frameHandCaptured;

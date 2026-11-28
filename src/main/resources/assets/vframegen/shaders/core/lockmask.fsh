@@ -11,7 +11,7 @@ uniform sampler2D HandDepth;
 
 layout(std140) uniform MaskParams {
     vec4 Flags;   // x: hand buffer valid, y: near-depth lock, z: its depth threshold
-    vec4 Params2; // x: reversed Z, y: unused, z: 1/width, w: 1/height
+    vec4 Params2; // x: reversed Z, y: Aetherium held item (see nearAt), z: 1/width, w: 1/height
 };
 
 layout(location = 0) in vec2 texCoord;
@@ -22,6 +22,12 @@ bool isSky(float d) {
 }
 
 bool nearAt(vec2 uv) {
+    // Aetherium keeps the world's depth under the held item and squeezes the item's own into
+    // 0.4375..0.5625, where the world only gets within about 10 cm of the camera.
+    if (Params2.y > 0.5) {
+        float h = texture(HandDepth, uv).r;
+        return h > 0.4374 && h < 0.5626;
+    }
     float d = texture(Depth, uv).r;
     return Params2.x > 0.5 ? d > Flags.z : d < Flags.z;
 }
